@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <title>Bond OS – Relationship Operating System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script>
+      window.__FIREBASE_CONFIG__ = {
+        apiKey: "AIzaSyDnHSEz5J7mBIxZVzrmvfJxwrSTc-N0PnY",
+      authDomain: "bond-8b898.firebaseapp.com",
+      projectId: "bond-8b898",
+      storageBucket: "bond-8b898.firebasestorage.app",
+      messagingSenderId: "913540056282",
+      appId: "1:913540056282:web:2dfe2eb516f549945f11e3",
+      measurementId: "G-4DCR2LF96W"
+      };
+      if (!firebase.apps.length) {
+        firebase.initializeApp(window.__FIREBASE_CONFIG__);
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
