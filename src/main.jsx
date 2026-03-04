@@ -2,11 +2,54 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom/client';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './lib/supabase';
 import './bond-styles.css';
-
 import * as Sentry from "@sentry/react";
 
+// ── Instagram WebView Fix ──
+(function redirectInstagramWebView() {
+  const isInstagram = /Instagram/.test(navigator.userAgent);
+  const isAndroid = /Android/.test(navigator.userAgent);
+  const isIOS = /iPhone|iPad/.test(navigator.userAgent);
+
+  // Android — force open in Chrome
+  if (isInstagram && isAndroid) {
+    const url = window.location.href;
+    window.location.href =
+      "intent://" +
+      url.replace(/https?:\/\//, "") +
+      "#Intent;scheme=https;package=com.android.chrome;end";
+    return; // ← stop here, don't run iOS code
+  }
+
+  // iOS — can't force redirect, show a banner instead
+  if (isInstagram && isIOS) {
+    const banner = document.createElement("div");
+    banner.innerHTML = `
+      <div style="
+        position:fixed; top:0; left:0; right:0; z-index:99999;
+        background:#1a1a2e; color:white;
+        padding:14px 16px; font-family:sans-serif;
+        display:flex; align-items:center; justify-content:space-between;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+      ">
+        <span style="font-size:13px; line-height:1.4">
+          📲 For the best experience,<br/>
+          tap <b>···</b> then <b>Open in Safari</b>
+        </span>
+        <button onclick="this.parentElement.parentElement.remove()" style="
+          background:transparent;
+          border:1px solid rgba(255,255,255,0.3);
+          color:white; border-radius:20px;
+          padding:6px 12px; font-size:12px; cursor:pointer;
+        ">Got it</button>
+      </div>
+    `;
+    document.body.prepend(banner);
+  }
+})();
+
+// ── Sentry ──
 Sentry.init({
-  dsn: "YOUR_DSN_HERE",
+  dsn: "https://89c23362f4753d7f7d7688f8c6e60488@o4510980003332096.ingest.us.sentry.io/4510980007723008",
   environment: import.meta.env.MODE,
   integrations: [
     Sentry.browserTracingIntegration(),
@@ -14,8 +57,10 @@ Sentry.init({
   tracesSampleRate: 0.2,
   replaysSessionSampleRate: 0.1,
   beforeSend(event) {
-    // Don't send errors from localhost
     if (window.location.hostname === "localhost") return null;
+    // Filter out Instagram WebView Java bridge crash (not your bug)
+    const msg = event.exception?.values?.[0]?.value || "";
+    if (msg.includes("Java object is gone")) return null;
     return event;
   },
 });
@@ -4311,7 +4356,8 @@ await supabase.functions.invoke("bond-coach", {
     mode: "partner_clone",
     userMessage: msg,
     partnerTraits,
-    history: cloneChat
+    history: cloneChat,
+    stream: false,
   }
 });
 
@@ -4930,7 +4976,7 @@ style={{ background: "radial-gradient(ellipse at top, #0d1424 0%, #020617 100%)"
           <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
           <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
         </svg>
-        Continue with Google (soon)
+        Continue with Google
       </button>
 
       <button
@@ -4945,7 +4991,7 @@ style={{ background: "radial-gradient(ellipse at top, #0d1424 0%, #020617 100%)"
         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="#1877F2">
           <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
         </svg>
-        Continue with Meta (soon)
+        Continue with Meta
       </button>
     </div>
   </div>
@@ -5691,7 +5737,96 @@ const SHIP_PLATFORMS = [
 { id:"irl", label:"👀 Real Life", icon:"👀" },
 { id:"other", label:"🌐 Other", icon:"🌐" },
 ];
-
+const CELEBRITY_SHIPS = [
+  {
+    id: "celeb_1",
+    person_a_name: "Taylor Swift", person_b_name: "Travis Kelce",
+    tagline: "Pop princess + football king = PR stunt or the real thing? 👑",
+    controversy: "Hot",
+    sails: 284700, sinks: 112400,
+    vibe_tags: ["tension", "everyone_knows"],
+    caption: "She started wearing his jersey. He started showing up to her concerts. Coincidence?",
+    story: "Met at his own concert when she sent a friendship bracelet backstage. Six months later, the whole world had an opinion about their love life.",
+    challenges_done: ["Matching outfits", "Public dedication", "Stadium kiss cam"],
+  },
+  {
+    id: "celeb_2",
+    person_a_name: "Ariana Grande", person_b_name: "Ethan Slater",
+    tagline: "Left their partners for each other — chaos or chemistry? 🔥",
+    controversy: "Controversial",
+    sails: 98200, sinks: 201500,
+    vibe_tags: ["chaos", "tension"],
+    caption: "Two divorces. One shared Broadway stage. A lot of Twitter opinions.",
+    story: "They met on the set of Wicked. Both were married. Now they're not. The internet has feelings.",
+    challenges_done: ["Going public", "Ignoring the drama"],
+  },
+  {
+    id: "celeb_3",
+    person_a_name: "Selena Gomez", person_b_name: "Benny Blanco",
+    tagline: "Her best friend first, her boyfriend second — and everyone's shocked? 😂",
+    controversy: "Wholesome",
+    sails: 317800, sinks: 54300,
+    vibe_tags: ["bff", "energy"],
+    caption: "She literally called him annoying for years. Now he's making her TikToks.",
+    story: "A decade of collaboration before anyone suspected romance. The fans found out via a pasta photo. Classic.",
+    challenges_done: ["Best friends first", "Cooking together", "Matching energy"],
+  },
+  {
+    id: "celeb_4",
+    person_a_name: "Kylie Jenner", person_b_name: "Timothée Chalamet",
+    tagline: "Chaos energy. Two different universes colliding. 🌀",
+    controversy: "Hot",
+    sails: 176300, sinks: 143700,
+    vibe_tags: ["chaos", "looks"],
+    caption: "The most unexpected couple of their generation. No one predicted this.",
+    story: "Started appearing at each other's events in 2023. The internet collectively short-circuited.",
+    challenges_done: ["Keeping it low-key", "Spotted together in Paris"],
+  },
+  {
+    id: "celeb_5",
+    person_a_name: "Sabrina Carpenter", person_b_name: "Barry Keoghan",
+    tagline: "She wrote an album about it. He showed up in the music video. Iconic. 🎬",
+    controversy: "Romantic",
+    sails: 241900, sinks: 67800,
+    vibe_tags: ["trying", "tension"],
+    caption: "'Please Please Please' is basically a relationship prayer at this point.",
+    story: "An Irish actor and a pop star whose songs now soundtrack an entire generation's heartbreaks and butterflies.",
+    challenges_done: ["Music video appearance", "Concert date", "Red carpet debut"],
+  },
+  {
+    id: "celeb_6",
+    person_a_name: "Kim Kardashian", person_b_name: "Pete Davidson",
+    tagline: "Still the most chaotic 9 months in celebrity history. No one's over it. 💀",
+    controversy: "Iconic",
+    sails: 88400, sinks: 312700,
+    vibe_tags: ["chaos", "everyone_knows"],
+    caption: "Neck tattoos. Brand deals. SNL. Divorce. It was a lot.",
+    story: "Began on a Saturday Night Live stage and ended as the most memed relationship of the decade. Respect.",
+    challenges_done: ["Matching outfits", "Neck tattoo", "Going viral daily"],
+  },
+  {
+    id: "celeb_7",
+    person_a_name: "Dua Lipa", person_b_name: "Callum Turner",
+    tagline: "Quietly the most aesthetic couple alive right now 🎨",
+    controversy: "Wholesome",
+    sails: 198500, sinks: 22100,
+    vibe_tags: ["looks", "energy"],
+    caption: "No drama, no chaos, just genuinely beautiful people being happy. Suspicious.",
+    story: "Confirmed by a paparazzi stroll in New York in early 2024. They both look like concept art. Unfair.",
+    challenges_done: ["Airport style", "Low-key date nights", "Fan approval 100%"],
+  },
+  {
+    id: "celeb_8",
+    person_a_name: "Jennifer Lopez", person_b_name: "Ben Affleck",
+    tagline: "Broke up for 20 years. Got back together. Now divorced again. Dedication. 💍",
+    controversy: "Controversial",
+    sails: 134200, sinks: 287900,
+    vibe_tags: ["tension", "trying"],
+    caption: "Bennifer 1.0. Then 2.0. Now 2.0 is also over. The saga continues.",
+    story: "Original 2002 romance. Reconnected 2021. Wedding 2022. Divorce filing 2024. They really committed to the bit.",
+    challenges_done: ["Second chance", "Massive wedding", "Staying in tabloids forever"],
+  },
+];
 function ShipPersonInput({ label, value, onChange }) {
 const [searchMode, setSearchMode] = React.useState(value.platform || "instagram");
 const [bondSearch, setBondSearch] = React.useState("");
@@ -5920,6 +6055,181 @@ other:     handle.startsWith("http") ? handle : `https://${handle}`,
 };
 return map[platform] ?? null;
 }
+
+
+// ============================================================
+// 1. CelebShipCard — new component, paste near ShipCard
+// ============================================================
+
+function CelebShipCard({ ship, onVote, myVote }) {
+  const [expanded, setExpanded] = React.useState(false);
+
+  const noise = React.useMemo(() => ({
+    sails: Math.floor(Math.random() * 800) - 400,
+    sinks: Math.floor(Math.random() * 800) - 400,
+  }), [ship.id]);
+
+  const sails = ship.sails + noise.sails + (myVote === "sail" ? 1 : 0);
+  const sinks = ship.sinks + noise.sinks + (myVote === "sink" ? 1 : 0);
+  const total = sails + sinks;
+  const sailPct = total > 0 ? Math.round((sails / total) * 100) : 50;
+  const fmtVotes = n => n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
+
+  const CONTROVERSY_STYLES = {
+    "Hot":          { bg:"rgba(239,68,68,0.15)",   color:"#f87171", icon:"🔥" },
+    "Controversial":{ bg:"rgba(251,191,36,0.12)",  color:"#fbbf24", icon:"⚡" },
+    "Wholesome":    { bg:"rgba(52,211,153,0.1)",   color:"#6ee7b7", icon:"💚" },
+    "Romantic":     { bg:"rgba(244,114,182,0.12)", color:"#f9a8d4", icon:"💕" },
+    "Iconic":       { bg:"rgba(167,139,250,0.12)", color:"#c4b5fd", icon:"👑" },
+  };
+  const cs = CONTROVERSY_STYLES[ship.controversy] || CONTROVERSY_STYLES["Hot"];
+
+  return (
+    <div style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.09)",
+      borderRadius:18, marginBottom:14, overflow:"hidden" }}>
+      <div style={{ height:2, background:"linear-gradient(90deg,#f87171,#fb923c,#fbbf24)" }} />
+      <div style={{ padding:"14px 14px 12px" }}>
+
+        {/* Names row */}
+        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
+          <div style={{ flex:1, textAlign:"center" }}>
+            <div style={{ width:46, height:46, borderRadius:14,
+              background:"linear-gradient(135deg,rgba(248,113,113,0.25),rgba(251,146,60,0.15))",
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:20, fontWeight:900, color:"#f87171", margin:"0 auto 6px",
+              border:"1px solid rgba(248,113,113,0.25)" }}>
+              {ship.person_a_name[0]}
+            </div>
+            <div style={{ fontSize:13, fontWeight:800, color:"#fff", lineHeight:1.2 }}>
+              {ship.person_a_name.split(" ")[0]}
+            </div>
+            <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:2 }}>
+              {ship.person_a_name.split(" ").slice(1).join(" ")}
+            </div>
+          </div>
+
+          <div style={{ textAlign:"center", flexShrink:0 }}>
+            <div style={{ fontSize:22, lineHeight:1 }}>🛳️</div>
+            <div style={{ fontSize:9, color:"rgba(255,255,255,0.2)", letterSpacing:"0.1em", marginTop:2 }}>SHIP</div>
+          </div>
+
+          <div style={{ flex:1, textAlign:"center" }}>
+            <div style={{ width:46, height:46, borderRadius:14,
+              background:"linear-gradient(135deg,rgba(251,146,60,0.25),rgba(251,191,36,0.15))",
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:20, fontWeight:900, color:"#fb923c", margin:"0 auto 6px",
+              border:"1px solid rgba(251,146,60,0.25)" }}>
+              {ship.person_b_name[0]}
+            </div>
+            <div style={{ fontSize:13, fontWeight:800, color:"#fff", lineHeight:1.2 }}>
+              {ship.person_b_name.split(" ")[0]}
+            </div>
+            <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:2 }}>
+              {ship.person_b_name.split(" ").slice(1).join(" ")}
+            </div>
+          </div>
+        </div>
+
+        {/* Controversy badge + tagline */}
+        <div style={{ display:"flex", alignItems:"flex-start", gap:8, marginBottom:10 }}>
+          <span style={{ fontSize:10, padding:"3px 9px", borderRadius:999,
+            background:cs.bg, color:cs.color, border:`1px solid ${cs.color}33`,
+            fontWeight:700, flexShrink:0, marginTop:2 }}>
+            {cs.icon} {ship.controversy}
+          </span>
+          <div style={{ fontSize:12, color:"rgba(255,255,255,0.6)", fontStyle:"italic",
+            lineHeight:1.5, flex:1 }}>
+            {ship.tagline}
+          </div>
+        </div>
+
+        {/* Vote bar */}
+        <div style={{ marginBottom:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between",
+            fontSize:10, color:"rgba(255,255,255,0.3)", marginBottom:4 }}>
+            <span>⛵ {fmtVotes(sails)} sailing</span>
+            <span>{sailPct}% sail</span>
+            <span>{fmtVotes(sinks)} sinking 🌊</span>
+          </div>
+          <div style={{ height:6, borderRadius:999, background:"rgba(255,255,255,0.07)", overflow:"hidden" }}>
+            <div style={{ height:"100%", width:`${sailPct}%`,
+              background:"linear-gradient(90deg,#34d399,#f87171)",
+              borderRadius:999, transition:"width 0.4s ease" }} />
+          </div>
+          <div style={{ fontSize:10, color:"rgba(255,255,255,0.2)", textAlign:"center", marginTop:4 }}>
+            {fmtVotes(total)} total votes
+          </div>
+        </div>
+
+        {/* Vote buttons */}
+        <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+          <button onClick={() => onVote(ship.id, "sail")}
+            style={{ flex:1, padding:"10px", borderRadius:12,
+              background: myVote==="sail" ? "rgba(52,211,153,0.2)" : "rgba(255,255,255,0.04)",
+              border: myVote==="sail" ? "1px solid rgba(52,211,153,0.4)" : "1px solid rgba(255,255,255,0.09)",
+              color: myVote==="sail" ? "#6ee7b7" : "rgba(255,255,255,0.5)",
+              fontSize:13, fontWeight:800, cursor:"pointer", transition:"all 0.15s", fontFamily:"inherit" }}>
+            ⛵ Sail It
+          </button>
+          <button onClick={() => onVote(ship.id, "sink")}
+            style={{ flex:1, padding:"10px", borderRadius:12,
+              background: myVote==="sink" ? "rgba(248,113,113,0.15)" : "rgba(255,255,255,0.04)",
+              border: myVote==="sink" ? "1px solid rgba(248,113,113,0.3)" : "1px solid rgba(255,255,255,0.09)",
+              color: myVote==="sink" ? "#fca5a5" : "rgba(255,255,255,0.5)",
+              fontSize:13, fontWeight:800, cursor:"pointer", transition:"all 0.15s", fontFamily:"inherit" }}>
+            🌊 Sink It
+          </button>
+        </div>
+
+        {/* Expand toggle */}
+        <button onClick={() => setExpanded(v => !v)}
+          style={{ width:"100%", padding:"8px", borderRadius:10,
+            background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.07)",
+            color:"rgba(255,255,255,0.3)", fontSize:11, fontWeight:600,
+            cursor:"pointer", fontFamily:"inherit", transition:"all 0.2s" }}>
+          {expanded ? "▲ Less" : "▼ Their story + challenges"}
+        </button>
+
+        {/* Expanded detail */}
+        {expanded && (
+          <div style={{ marginTop:12, background:"rgba(255,255,255,0.02)",
+            border:"1px solid rgba(255,255,255,0.06)", borderRadius:12, padding:14 }}>
+            {ship.caption && (
+              <div style={{ fontSize:12, color:"rgba(255,255,255,0.5)",
+                fontStyle:"italic", marginBottom:12, lineHeight:1.6 }}>
+                "{ship.caption}"
+              </div>
+            )}
+            {ship.story && (
+              <div style={{ fontSize:13, color:"rgba(255,255,255,0.7)",
+                lineHeight:1.7, marginBottom:12 }}>
+                {ship.story}
+              </div>
+            )}
+            {ship.challenges_done?.length > 0 && (
+              <div>
+                <div style={{ fontSize:10, fontWeight:700, color:"rgba(255,255,255,0.25)",
+                  letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:8 }}>
+                  ⚡ Challenges Completed
+                </div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                  {ship.challenges_done.map((c, i) => (
+                    <span key={i} style={{ fontSize:11, padding:"3px 10px", borderRadius:999,
+                      background:"rgba(52,211,153,0.08)", color:"rgba(52,211,153,0.8)",
+                      border:"1px solid rgba(52,211,153,0.15)" }}>
+                      ✓ {c}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ShipCard({ ship, onVote, myVote }) {
 const [showComments, setShowComments] = React.useState(false);
 const totalVotes = (ship.sails||0) + (ship.sinks||0);
@@ -6027,6 +6337,10 @@ Comment
 );
 }
 
+// ============================================================
+// 5. ShipItHub — FULL CORRECTED VERSION
+// ============================================================
+
 function ShipItHub({ data, save }) {
 const [tab, setTab] = React.useState("ships");
 const [ships, setShips] = React.useState([]);
@@ -6034,141 +6348,214 @@ const [myVotes, setMyVotes] = React.useState({});
 const [loading, setLoading] = React.useState(true);
 const [refreshKey, setRefreshKey] = React.useState(0);
 const [search, setSearch] = React.useState("");
+
+// ── NEW: celeb votes (localStorage backed) ──
+const [celebVotes, setCelebVotes] = React.useState(() => {
+  try {
+    const saved = localStorage.getItem("bond_celeb_votes");
+    return saved ? JSON.parse(saved) : {};
+  } catch { return {}; }
+});
+
 React.useEffect(() => {
-let mounted = true;
-async function load() {
-setLoading(true);
-try {
-const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid") || "none";
-const [{ data: shipData }, { data: voteData }] = await Promise.all([
-window.supabaseClient.from("ship_it").select("*").order("created_at", { ascending:false }).limit(50),
-window.supabaseClient.from("ship_votes").select("ship_id,vote").eq("user_id", uid)
-]);
-if (!mounted) return;
-setShips(shipData || []);
-const vMap = {};
-(voteData||[]).forEach(v => { vMap[v.ship_id] = v.vote; });
-setMyVotes(vMap);
-} catch(e) { console.warn("[ShipIt] load failed", e); }
-setLoading(false);
-}
-load();
-return () => { mounted = false; };
+  let mounted = true;
+  async function load() {
+    setLoading(true);
+    try {
+      const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid") || "none";
+      const [{ data: shipData }, { data: voteData }] = await Promise.all([
+        window.supabaseClient.from("ship_it").select("*").order("created_at", { ascending:false }).limit(50),
+        window.supabaseClient.from("ship_votes").select("ship_id,vote").eq("user_id", uid),
+      ]);
+      if (!mounted) return;
+      setShips(shipData || []);
+      const vMap = {};
+      (voteData||[]).forEach(v => { vMap[v.ship_id] = v.vote; });
+      setMyVotes(vMap);
+    } catch(e) { console.warn("[ShipIt] load failed", e); }
+    setLoading(false);
+  }
+  load();
+  return () => { mounted = false; };
 }, [refreshKey]);
 
 async function handleVote(shipId, vote) {
-const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid");
-if (!uid) return;
-const prev = myVotes[shipId];
-const isSame = prev === vote;
-setMyVotes(p => ({ ...p, [shipId]: isSame ? null : vote }));
-setShips(prev => prev.map(s => {
-if (s.id !== shipId) return s;
-const ns = { ...s };
-if (prev==="sail") ns.sails = Math.max(0,(ns.sails||0)-1);
-if (prev==="sink") ns.sinks = Math.max(0,(ns.sinks||0)-1);
-if (!isSame) { if (vote==="sail") ns.sails=(ns.sails||0)+1; else ns.sinks=(ns.sinks||0)+1; }
-return ns;
-}));
-try {
-const session = await window.supabaseClient.auth.getSession();
-const token = session?.data?.session?.access_token ?? window.SUPABASE_ANON_KEY;
-await fetch(`${window.SUPABASE_URL}/functions/v1/api-vote-ship`, {
-method: "POST",
-headers: {
-"Content-Type": "application/json",
-"Authorization": `Bearer ${token}`
-},
-body: JSON.stringify({ shipId, vote: isSame ? null : vote }),
-});
-} catch(e) { console.warn("[ShipIt] vote failed", e); }
+  const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid");
+  if (!uid) return;
+  const prev = myVotes[shipId];
+  const isSame = prev === vote;
+  setMyVotes(p => ({ ...p, [shipId]: isSame ? null : vote }));
+  setShips(prev => prev.map(s => {
+    if (s.id !== shipId) return s;
+    const ns = { ...s };
+    if (prev==="sail") ns.sails = Math.max(0,(ns.sails||0)-1);
+    if (prev==="sink") ns.sinks = Math.max(0,(ns.sinks||0)-1);
+    if (!isSame) { if (vote==="sail") ns.sails=(ns.sails||0)+1; else ns.sinks=(ns.sinks||0)+1; }
+    return ns;
+  }));
+  try {
+    const session = await window.supabaseClient.auth.getSession();
+    const token = session?.data?.session?.access_token ?? window.SUPABASE_ANON_KEY;
+    await fetch(`${window.SUPABASE_URL}/functions/v1/api-vote-ship`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ shipId, vote: isSame ? null : vote }),
+    });
+  } catch(e) { console.warn("[ShipIt] vote failed", e); }
 }
+
+// ── NEW: celeb vote handler ──
+function handleCelebVote(shipId, vote) {
+  const prev = celebVotes[shipId];
+  const isSame = prev === vote;
+  const next = isSame ? null : vote;
+  const updated = { ...celebVotes, [shipId]: next };
+  setCelebVotes(updated);
+  try { localStorage.setItem("bond_celeb_votes", JSON.stringify(updated)); } catch {}
+}
+
 const hallShips = [...ships].sort((a,b) => (b.sails||0)-(a.sails||0)).slice(0,10);
+
 const visibleShips = React.useMemo(() => {
-const q = search.trim().toLowerCase();
-if (!q) return ships;
-return ships.filter(s => {
-const fields = [s.person_a_name, s.person_a_handle, s.person_b_name,
-s.person_b_handle, s.caption, ...(s.vibe_tags || [])].filter(Boolean);
-return fields.some(f => String(f).toLowerCase().includes(q));
-});
+  const q = search.trim().toLowerCase();
+  if (!q) return ships;
+  return ships.filter(s => {
+    const fields = [s.person_a_name, s.person_a_handle, s.person_b_name,
+      s.person_b_handle, s.caption, ...(s.vibe_tags || [])].filter(Boolean);
+    return fields.some(f => String(f).toLowerCase().includes(q));
+  });
 }, [ships, search]);
-const TABS = [{ id:"ships", label:"Active Ships" },{ id:"drop", label:" Drop a Ship" },{ id:"hall", label:" Hall of Ships" }];
+
+// ── UPDATED: 4 tabs now ──
+const TABS = [
+  { id:"ships", label:"Active Ships" },
+  { id:"celeb", label:"⭐ Celeb Ships" },
+  { id:"drop",  label:"⚡ Drop a Ship" },
+  { id:"hall",  label:"🏆 Hall of Ships" },
+];
+
 return (
-<AppShell title="🚢 Ship It" onBack={() => save({ playSub: null })}>
-<div style={{ display:"flex", gap:4, padding:"3px", borderRadius:14, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)", marginBottom:16 }}>
-{TABS.map(t => (
-<button key={t.id} onClick={() => setTab(t.id)}
-style={{ flex:1, padding:"7px 0", borderRadius:11, fontSize:11, fontWeight: tab===t.id ? 700 : 500, background: tab===t.id ? "rgba(248,113,113,0.18)" : "transparent", color: tab===t.id ? "#f87171" : "rgba(255,255,255,0.4)", border: tab===t.id ? "1px solid rgba(248,113,113,0.22)" : "1px solid transparent", cursor:"pointer", transition:"all 0.18s", fontFamily:"inherit" }}>
-{t.label}
-</button>
-))}
-</div>
-{tab === "ships" && (
-<div>
-{/* ── Search bar ── */}
-<div style={{ position:"relative", marginBottom:12 }}>
-<input
-type="text" value={search} onChange={e => setSearch(e.target.value)}
-placeholder="Search by name, handle, vibe…"
-style={{ width:"100%", boxSizing:"border-box",
-background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.09)",
-borderRadius:14, padding:"10px 38px 10px 16px", fontSize:13, color:"#fff",
-outline:"none", fontFamily:"inherit" }}
-onFocus={e => e.target.style.borderColor="rgba(248,113,113,0.35)"}
-onBlur={e  => e.target.style.borderColor="rgba(255,255,255,0.09)"}
-/>
-{search
-? <button onClick={() => setSearch("")}
-  style={{ position:"absolute", right:12, top:"50%",
-    transform:"translateY(-50%)", background:"rgba(255,255,255,0.12)",
-    border:"none", color:"rgba(255,255,255,0.7)", cursor:"pointer",
-    width:20, height:20, borderRadius:999, fontSize:12,
-    display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>×</button>
-: <span style={{ position:"absolute", right:14, top:"50%",
-  transform:"translateY(-50%)", color:"rgba(255,255,255,0.2)",
-  fontSize:14, pointerEvents:"none" }}>⌕</span>
-}
-</div>
-<div style={{ display:"flex", justifyContent:"space-between",
-alignItems:"center", marginBottom:12 }}>
-<div style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>
-{visibleShips.length} ship{visibleShips.length !== 1 ? "s" : ""}
-{search ? " found" : " active"}
-</div>
-<button onClick={() => setRefreshKey(k=>k+1)}style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)", color:"rgba(255,255,255,0.35)", cursor:"pointer", borderRadius:8, padding:"5px 10px", fontSize:12, fontFamily:"inherit" }}>↻</button>
-</div>
-{loading ? <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(248,113,113,0.35)", fontSize:13 }}>Loading ships…</div>
-: ships.length === 0 ? (
-<div style={{ textAlign:"center", padding:"50px 0" }}>
-<div style={{ fontSize:40, marginBottom:8 }}>🚢</div>
-<div style={{ color:"rgba(255,255,255,0.25)", fontSize:13 }}>No ships yet — drop the first one!</div>
-<button onClick={() => setTab("drop")} style={{ marginTop:16, padding:"10px 24px", borderRadius:14, background:"linear-gradient(135deg,#f87171,#fb923c)", border:"none", color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Drop a Ship 🚢</button>
-</div>
-) : visibleShips.length === 0 && search ? (
-<div style={{ textAlign:"center", padding:"40px 0",
-color:"rgba(255,255,255,0.25)", fontSize:13 }}>
-No ships match "{search}"
-</div>
-) : visibleShips.map(ship => <ShipCard key={ship.id} ship={ship} onVote={handleVote}
-myVote={myVotes[ship.id]||null} />)}
-</div>
-)}
-{tab === "drop" && <DropShipForm onShipDropped={() => { setRefreshKey(k=>k+1); setTab("ships"); }} />}
-{tab === "hall" && (
-<div>
-<div style={{ fontSize:12, color:"rgba(255,255,255,0.3)", marginBottom:14 }}>🏆 Most sailed ships of all time</div>
-{loading ? <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(248,113,113,0.35)", fontSize:13 }}>Loading…</div>
-: hallShips.length === 0 ? <div style={{ textAlign:"center", padding:"50px 0", color:"rgba(255,255,255,0.2)", fontSize:13 }}><div style={{ fontSize:36, marginBottom:8 }}>🏆</div>No ships yet</div>
-: hallShips.map((ship, i) => (
-<div key={ship.id} style={{ position:"relative" }}>
-{i===0 && <div style={{ position:"absolute", top:-4, right:12, fontSize:18, zIndex:2 }}>👑</div>}
-<ShipCard ship={ship} onVote={handleVote} myVote={myVotes[ship.id]||null} />
-</div>
-))}
-</div>
-)}
-</AppShell>
+  <AppShell title="🚢 Ship It" onBack={() => save({ playSub: null })}>
+
+    {/* Tab bar */}
+    <div style={{ display:"flex", gap:4, padding:"3px", borderRadius:14,
+      background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)",
+      marginBottom:16, overflowX:"auto" }}>
+      {TABS.map(t => (
+        <button key={t.id} onClick={() => setTab(t.id)}
+          style={{ flex:1, padding:"7px 0", borderRadius:11, fontSize:11,
+            fontWeight: tab===t.id ? 700 : 500, whiteSpace:"nowrap",
+            background: tab===t.id ? "rgba(248,113,113,0.18)" : "transparent",
+            color: tab===t.id ? "#f87171" : "rgba(255,255,255,0.4)",
+            border: tab===t.id ? "1px solid rgba(248,113,113,0.22)" : "1px solid transparent",
+            cursor:"pointer", transition:"all 0.18s", fontFamily:"inherit" }}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+
+    {/* ── ACTIVE SHIPS ── */}
+    {tab === "ships" && (
+      <div>
+        <div style={{ position:"relative", marginBottom:12 }}>
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name, handle, vibe…"
+            style={{ width:"100%", boxSizing:"border-box",
+              background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.09)",
+              borderRadius:14, padding:"10px 38px 10px 16px", fontSize:13, color:"#fff",
+              outline:"none", fontFamily:"inherit" }}
+            onFocus={e => e.target.style.borderColor="rgba(248,113,113,0.35)"}
+            onBlur={e  => e.target.style.borderColor="rgba(255,255,255,0.09)"}
+          />
+          {search
+            ? <button onClick={() => setSearch("")}
+                style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)",
+                  background:"rgba(255,255,255,0.12)", border:"none", color:"rgba(255,255,255,0.7)",
+                  cursor:"pointer", width:20, height:20, borderRadius:999, fontSize:12,
+                  display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>×</button>
+            : <span style={{ position:"absolute", right:14, top:"50%", transform:"translateY(-50%)",
+                color:"rgba(255,255,255,0.2)", fontSize:14, pointerEvents:"none" }}>⌕</span>
+          }
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>
+            {visibleShips.length} ship{visibleShips.length !== 1 ? "s" : ""}
+            {search ? " found" : " active"}
+          </div>
+          <button onClick={() => setRefreshKey(k=>k+1)}
+            style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)",
+              color:"rgba(255,255,255,0.35)", cursor:"pointer", borderRadius:8,
+              padding:"5px 10px", fontSize:12, fontFamily:"inherit" }}>↻</button>
+        </div>
+        {loading
+          ? <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(248,113,113,0.35)", fontSize:13 }}>Loading ships…</div>
+          : ships.length === 0 ? (
+            <div style={{ textAlign:"center", padding:"50px 0" }}>
+              <div style={{ fontSize:40, marginBottom:8 }}>🚢</div>
+              <div style={{ color:"rgba(255,255,255,0.25)", fontSize:13 }}>No ships yet — drop the first one!</div>
+              <button onClick={() => setTab("drop")}
+                style={{ marginTop:16, padding:"10px 24px", borderRadius:14,
+                  background:"linear-gradient(135deg,#f87171,#fb923c)", border:"none",
+                  color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+                Drop a Ship 🚢
+              </button>
+            </div>
+          ) : visibleShips.length === 0 && search ? (
+            <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(255,255,255,0.25)", fontSize:13 }}>
+              No ships match "{search}"
+            </div>
+          ) : visibleShips.map(ship => (
+            <ShipCard key={ship.id} ship={ship} onVote={handleVote} myVote={myVotes[ship.id]||null} />
+          ))
+        }
+      </div>
+    )}
+
+    {/* ── NEW: CELEB SHIPS ── */}
+    {tab === "celeb" && (
+      <div>
+        <div style={{ fontSize:12, color:"rgba(255,255,255,0.3)", marginBottom:14, lineHeight:1.6 }}>
+          The internet's most debated celebrity ships. Cast your vote. 🌊
+        </div>
+        {CELEBRITY_SHIPS.map(ship => (
+          <CelebShipCard
+            key={ship.id}
+            ship={ship}
+            myVote={celebVotes[ship.id] || null}
+            onVote={handleCelebVote}
+          />
+        ))}
+      </div>
+    )}
+
+    {/* ── DROP A SHIP ── */}
+    {tab === "drop" && (
+      <DropShipForm onShipDropped={() => { setRefreshKey(k=>k+1); setTab("ships"); }} />
+    )}
+
+    {/* ── HALL OF SHIPS ── */}
+    {tab === "hall" && (
+      <div>
+        <div style={{ fontSize:12, color:"rgba(255,255,255,0.3)", marginBottom:14 }}>
+          🏆 Most sailed ships of all time
+        </div>
+        {loading
+          ? <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(248,113,113,0.35)", fontSize:13 }}>Loading…</div>
+          : hallShips.length === 0
+            ? <div style={{ textAlign:"center", padding:"50px 0", color:"rgba(255,255,255,0.2)", fontSize:13 }}>
+                <div style={{ fontSize:36, marginBottom:8 }}>🏆</div>No ships yet
+              </div>
+            : hallShips.map((ship, i) => (
+                <div key={ship.id} style={{ position:"relative" }}>
+                  {i===0 && <div style={{ position:"absolute", top:-4, right:12, fontSize:18, zIndex:2 }}>👑</div>}
+                  <ShipCard ship={ship} onVote={handleVote} myVote={myVotes[ship.id]||null} />
+                </div>
+              ))
+        }
+      </div>
+    )}
+
+  </AppShell>
 );
 }
 /* ============================================================
@@ -6193,7 +6580,12 @@ if (mounted) { setMyCouple(data || null); setLoading(false); }
 load();
 return () => { mounted = false; };
 }, []);
-
+// Inside function CoupleHub(), add this effect:
+React.useEffect(() => {
+  function handleGoto() { setView("create"); }
+  window.addEventListener("bond_goto_create_couple", handleGoto);
+  return () => window.removeEventListener("bond_goto_create_couple", handleGoto);
+}, []);
 if (loading) return (
 <div style={{ padding:"0 16px" }}>
 <SkeletonCard />
@@ -6259,31 +6651,92 @@ Discover
 </div>
 );
 }
-
 const PLACEHOLDER_COUPLES = [
-{
-id: "__p1", couple_name: "Aria & Zain", couple_type: "Romantic",
-bond_score: 91, emotional_sync_score: 88, stability_score: 85,
-partner_username: "@ariazain", locality: "London",
-backstory: "Met at a midnight market. Never left.",
-avatar_url: null, _isPlaceholder: true
-},
-{
-id: "__p2", couple_name: "Maya & Dev", couple_type: "Long Distance",
-bond_score: 84, emotional_sync_score: 79, stability_score: 88,
-partner_username: "@mayadev", locality: "Mumbai / Toronto",
-backstory: "3 timezones. One bond score.",
-avatar_url: null, _isPlaceholder: true
-},
-{
-id: "__p3", couple_name: "Sofía & Luca", couple_type: "Friends to Lovers",
-bond_score: 76, emotional_sync_score: 82, stability_score: 71,
-partner_username: "@sofialuca", locality: "Barcelona",
-backstory: "10 years of 'just friends'. Then one honest conversation.",
-avatar_url: null, _isPlaceholder: true
-},
+  {
+    id: "__p1", couple_name: "Aria & Zain", couple_type: "Romantic",
+    bond_score: 91, emotional_sync_score: 88, stability_score: 85, growth_index: 79,
+    partner_username: "@ariazain", locality: "London",
+    backstory: "Met at a midnight market. Never left.",
+    avatar_url: null, _isPlaceholder: true
+  },
+  {
+    id: "__p2", couple_name: "Maya & Dev", couple_type: "Long Distance",
+    bond_score: 84, emotional_sync_score: 79, stability_score: 88, growth_index: 72,
+    partner_username: "@mayadev", locality: "Mumbai / Toronto",
+    backstory: "3 timezones. One bond score.",
+    avatar_url: null, _isPlaceholder: true
+  },
+  {
+    id: "__p3", couple_name: "Sofía & Luca", couple_type: "Friends to Lovers",
+    bond_score: 76, emotional_sync_score: 82, stability_score: 71, growth_index: 88,
+    partner_username: "@sofialuca", locality: "Barcelona",
+    backstory: "10 years of 'just friends'. Then one honest conversation.",
+    avatar_url: null, _isPlaceholder: true
+  },
+  {
+    id: "__p4", couple_name: "Priya & Karan", couple_type: "Married",
+    bond_score: 94, emotional_sync_score: 91, stability_score: 96, growth_index: 82,
+    partner_username: "@priyakaran", locality: "Delhi",
+    backstory: "Arranged meeting. Unarranged falling.",
+    avatar_url: null, _isPlaceholder: true
+  },
+  {
+    id: "__p5", couple_name: "Jess & Theo", couple_type: "Situationship",
+    bond_score: 61, emotional_sync_score: 74, stability_score: 43, growth_index: 65,
+    partner_username: "@jesstheo", locality: "New York",
+    backstory: "We're not labelling it. But we're also not not labelling it.",
+    avatar_url: null, _isPlaceholder: true
+  },
+  {
+    id: "__p6", couple_name: "Amara & Felix", couple_type: "Engaged",
+    bond_score: 89, emotional_sync_score: 86, stability_score: 90, growth_index: 77,
+    partner_username: "@amarafelix", locality: "Lagos / Berlin",
+    backstory: "He proposed at the airport. Departure terminal. She missed the flight.",
+    avatar_url: null, _isPlaceholder: true
+  },
+  {
+    id: "__p7", couple_name: "Riya & Sam", couple_type: "Friends to Lovers",
+    bond_score: 73, emotional_sync_score: 80, stability_score: 68, growth_index: 91,
+    partner_username: "@riyasam", locality: "Bangalore",
+    backstory: "Two years of 'we're just study partners'.",
+    avatar_url: null, _isPlaceholder: true
+  },
+  {
+    id: "__p8", couple_name: "Nour & Aiden", couple_type: "Long Distance",
+    bond_score: 79, emotional_sync_score: 76, stability_score: 83, growth_index: 74,
+    partner_username: "@nouraiden", locality: "Cairo / Sydney",
+    backstory: "Met during a 6-hour layover. Decided it was worth the distance.",
+    avatar_url: null, _isPlaceholder: true
+  },
+  {
+    id: "__p9", couple_name: "Leila & Marco", couple_type: "Romantic",
+    bond_score: 88, emotional_sync_score: 85, stability_score: 80, growth_index: 93,
+    partner_username: "@leilamarco", locality: "Paris",
+    backstory: "Bonded over hating the same movie. Watched it again together anyway.",
+    avatar_url: null, _isPlaceholder: true
+  },
+  {
+    id: "__p10", couple_name: "Jin & Haruki", couple_type: "Married",
+    bond_score: 97, emotional_sync_score: 95, stability_score: 98, growth_index: 88,
+    partner_username: "@jinharuki", locality: "Seoul / Tokyo",
+    backstory: "11 years. Still send each other good morning texts first.",
+    avatar_url: null, _isPlaceholder: true
+  },
+  {
+    id: "__p11", couple_name: "Tanya & Rohan", couple_type: "Situationship",
+    bond_score: 57, emotional_sync_score: 69, stability_score: 40, growth_index: 61,
+    partner_username: "@tanyarohan", locality: "Mumbai",
+    backstory: "They said 'let's not overthink it'. They overthink it constantly.",
+    avatar_url: null, _isPlaceholder: true
+  },
+  {
+    id: "__p12", couple_name: "Zara & Elias", couple_type: "Romantic",
+    bond_score: 83, emotional_sync_score: 78, stability_score: 87, growth_index: 76,
+    partner_username: "@zaraelias", locality: "Dubai",
+    backstory: "Both reached for the last copy of the same book. Fought over it. Fell for each other.",
+    avatar_url: null, _isPlaceholder: true
+  },
 ];
-
 // ── Session feed cache (survives page refresh, clears on tab close) ─
 const FEED_CACHE_KEY = "bond_couple_feed_v1";
 const FEED_CACHE_TTL = 60_000; // 60 seconds
@@ -6334,6 +6787,11 @@ C — REPLACE → function CoupleFeed()
 BLOCK 2 — REPLACE function CoupleFeed()
 Adds search bar (client-side, searches couple name + type)
 ============================================================ */
+
+// ============================================================
+// 4. CoupleFeed — FULL CORRECTED VERSION
+// ============================================================
+
 function CoupleFeed() {
 const TYPES = ["all","Romantic","Engaged","Married","Long Distance","Situationship","Friends to Lovers"];
 const EMOJIS = ["\u2764\uFE0F","\uD83D\uDE0D","\uD83D\uDD25","\uD83D\uDCAF","\uD83E\uDD79"];
@@ -6344,6 +6802,8 @@ const [couples, setCouples] = React.useState([]);
 const [reactions, setReactions] = React.useState({});
 const [myReactions, setMyReactions] = React.useState({});
 const [commentCounts, setCommentCounts] = React.useState({});
+// ── NEW ──
+const [photoCounts, setPhotoCounts] = React.useState({});
 const [loading, setLoading] = React.useState(true);
 const [realLoaded, setRealLoaded] = React.useState(false);
 const [refreshKey, setRefreshKey] = React.useState(0);
@@ -6352,291 +6812,374 @@ const [hasMore, setHasMore] = React.useState(true);
 const PAGE_SIZE = 12;
 const [selectedCouple, setSelectedCouple] = React.useState(null);
 const [statusIds, setStatusIds] = React.useState(new Set());
-React.useEffect(() => {
-let mounted = true;
-let retryTimer = null;
-async function fetchAll() {
-if (page === 0) {
-const cached = readFeedCache();
-if (cached) {
-setCouples(cached.couples);
-setReactions(cached.reactions);
-setMyReactions(cached.myReactions);
-setCommentCounts(cached.commentCounts);
-setLoading(false);
-setRealLoaded(true);
-// Still fetch fresh data in background
-}
-}
-// ─────────────────────────────────────────────────────────────────
-
-setLoading(true);
-if (!window.supabaseClient) { retryTimer = setTimeout(() => { if (mounted) fetchAll(); }, 300); return; }
-setLoading(true);
-try {
-let q = window.supabaseClient.from("couples")
-.select("id,couple_name,partner_username,couple_type,bond_score,emotional_sync_score,stability_score,growth_index,avatar_url,institution,locality,declared_by,created_at,social_links,backstory")
-.order("bond_score", { ascending: false })
-.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-if (filter !== "all") q = q.eq("couple_type", filter);
-const { data: cList, error: cErr } = await q;
-if (cErr) throw cErr;
-const safeList = cList || [];
-const ids = safeList.map(c => c.id);
-let allRxns = [], allComments = [];
-if (ids.length) {
-const [rxnRes, cmtRes] = await Promise.all([
-window.supabaseClient.from("reactions").select("target_id,user_id,reaction_type")
-.eq("target_type","couple").in("target_id", ids),
-window.supabaseClient.from("couple_comments").select("couple_id")
-.eq("target_type","couple").in("couple_id", ids)
-]);
-allRxns = rxnRes.data || [];
-allComments = cmtRes.data || [];
-}
-if (!mounted) return;
-const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid");
-const rMap = {}, myMap = {}, cntMap = {};
-ids.forEach(id => { rMap[id] = {}; EMOJIS.forEach(e => { rMap[id][e] = 0; }); cntMap[id] = 0; });
-allRxns.forEach(r => {
-if (rMap[r.target_id] && EMOJIS.includes(r.reaction_type)) {
-rMap[r.target_id][r.reaction_type] = (rMap[r.target_id][r.reaction_type] || 0) + 1;
-if (uid && r.user_id === uid) myMap[r.target_id] = r.reaction_type;
-}
+// ── ADD these after const [statusIds, setStatusIds] = React.useState(new Set());
+const [localReactions, setLocalReactions] = React.useState(() => {
+  try {
+    const saved = localStorage.getItem("bond_placeholder_reactions");
+    return saved ? JSON.parse(saved) : {};
+  } catch { return {}; }
 });
-allComments.forEach(c => { if (cntMap[c.couple_id] !== undefined) cntMap[c.couple_id]++; });
-// Batch status check — one query instead of N queries
-let statusSet = new Set();
-if (ids.length) {
-const { data: statusData } = await window.supabaseClient
-.from("couple_statuses")
-.select("couple_id")
-.in("couple_id", ids)
-.gt("expires_at", new Date().toISOString());
-(statusData || []).forEach(s => statusSet.add(s.couple_id));
-}
-setCouples(prev => page === 0 ? safeList : [...prev, ...safeList]);
-setHasMore(safeList.length === PAGE_SIZE); setReactions(rMap);
-setMyReactions(myMap);
-setCommentCounts(cntMap);
-setStatusIds(statusSet);
+const [localMyReactions, setLocalMyReactions] = React.useState(() => {
+  try {
+    const saved = localStorage.getItem("bond_placeholder_my_reactions");
+    return saved ? JSON.parse(saved) : {};
+  } catch { return {}; }
+});
 
-// ── Write cache for instant next visit ──────────────────────────
-if (page === 0) {
-writeFeedCache({ couples: safeList, reactions: rMap, myReactions: myMap, commentCounts: cntMap });
-}
-// ────────────────────────────────────────────────────────────────
+function handleLocalReact(coupleId, emoji) {
+  const EMOJIS = ["\u2764\uFE0F","\uD83D\uDE0D","\uD83D\uDD25","\uD83D\uDCAF","\uD83E\uDD79"];
+  const prev = localMyReactions[coupleId];
+  const isSame = prev === emoji;
+  const next = isSame ? null : emoji;
 
-} catch(err) {
-console.error("[CoupleFeed] fetch failed:", err);
-if (mounted) setCouples([]);
-} finally {
-if (mounted) {
-setLoading(false);
-setRealLoaded(true);    // ← ADD THIS (was just setLoading(false) before)
-}
-}
-}
+  const newMyR = { ...localMyReactions, [coupleId]: next };
+  const prevCounts = localReactions[coupleId] || {};
+  const newCounts = { ...prevCounts };
+  EMOJIS.forEach(e => { if (!newCounts[e]) newCounts[e] = 0; });
+  if (prev && newCounts[prev] > 0) newCounts[prev]--;
+  if (!isSame) newCounts[emoji] = (newCounts[emoji] || 0) + 1;
 
-fetchAll();
-return () => { mounted = false; if (retryTimer) clearTimeout(retryTimer); };
+  const newR = { ...localReactions, [coupleId]: newCounts };
+  setLocalMyReactions(newMyR);
+  setLocalReactions(newR);
+
+  try {
+    localStorage.setItem("bond_placeholder_reactions", JSON.stringify(newR));
+    localStorage.setItem("bond_placeholder_my_reactions", JSON.stringify(newMyR));
+  } catch {}
+}
+React.useEffect(() => {
+  let mounted = true;
+  let retryTimer = null;
+  async function fetchAll() {
+    if (page === 0) {
+      const cached = readFeedCache();
+      if (cached) {
+        setCouples(cached.couples);
+        setReactions(cached.reactions);
+        setMyReactions(cached.myReactions);
+        setCommentCounts(cached.commentCounts);
+        setLoading(false);
+        setRealLoaded(true);
+      }
+    }
+    setLoading(true);
+    if (!window.supabaseClient) { retryTimer = setTimeout(() => { if (mounted) fetchAll(); }, 300); return; }
+    setLoading(true);
+    try {
+      let q = window.supabaseClient.from("couples")
+        .select("id,couple_name,partner_username,couple_type,bond_score,emotional_sync_score,stability_score,growth_index,avatar_url,institution,locality,declared_by,created_at,social_links,backstory")
+        .order("bond_score", { ascending: false })
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      if (filter !== "all") q = q.eq("couple_type", filter);
+      const { data: cList, error: cErr } = await q;
+      if (cErr) throw cErr;
+      const safeList = cList || [];
+      const ids = safeList.map(c => c.id);
+      let allRxns = [], allComments = [], allPhotos = [];
+      if (ids.length) {
+        const [rxnRes, cmtRes, photoRes] = await Promise.all([
+          window.supabaseClient.from("reactions")
+            .select("target_id,user_id,reaction_type")
+            .eq("target_type","couple").in("target_id", ids),
+          window.supabaseClient.from("couple_comments")
+            .select("couple_id")
+            .eq("target_type","couple").in("couple_id", ids),
+          // ── NEW: community photo counts ──
+          window.supabaseClient.from("couple_community_photos")
+            .select("couple_id")
+            .in("couple_id", ids),
+        ]);
+        allRxns    = rxnRes.data   || [];
+        allComments = cmtRes.data  || [];
+        allPhotos  = photoRes.data || [];
+      }
+      if (!mounted) return;
+      const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid");
+      const rMap = {}, myMap = {}, cntMap = {}, photoMap = {};
+      ids.forEach(id => {
+        rMap[id] = {};
+        EMOJIS.forEach(e => { rMap[id][e] = 0; });
+        cntMap[id] = 0;
+        photoMap[id] = 0;
+      });
+      allRxns.forEach(r => {
+        if (rMap[r.target_id] && EMOJIS.includes(r.reaction_type)) {
+          rMap[r.target_id][r.reaction_type] = (rMap[r.target_id][r.reaction_type] || 0) + 1;
+          if (uid && r.user_id === uid) myMap[r.target_id] = r.reaction_type;
+        }
+      });
+      allComments.forEach(c => { if (cntMap[c.couple_id] !== undefined) cntMap[c.couple_id]++; });
+      // ── NEW: tally photo counts ──
+      allPhotos.forEach(p => { if (photoMap[p.couple_id] !== undefined) photoMap[p.couple_id]++; });
+
+      // Batch status check
+      let statusSet = new Set();
+      if (ids.length) {
+        const { data: statusData } = await window.supabaseClient
+          .from("couple_statuses").select("couple_id")
+          .in("couple_id", ids).gt("expires_at", new Date().toISOString());
+        (statusData || []).forEach(s => statusSet.add(s.couple_id));
+      }
+      setCouples(prev => page === 0 ? safeList : [...prev, ...safeList]);
+      setHasMore(safeList.length === PAGE_SIZE);
+      setReactions(rMap);
+      setMyReactions(myMap);
+      setCommentCounts(cntMap);
+      setPhotoCounts(photoMap); // ── NEW ──
+      setStatusIds(statusSet);
+      if (page === 0) {
+        writeFeedCache({ couples: safeList, reactions: rMap, myReactions: myMap, commentCounts: cntMap });
+      }
+    } catch(err) {
+      console.error("[CoupleFeed] fetch failed:", err);
+      if (mounted) setCouples([]);
+    } finally {
+      if (mounted) { setLoading(false); setRealLoaded(true); }
+    }
+  }
+  fetchAll();
+  return () => { mounted = false; if (retryTimer) clearTimeout(retryTimer); };
 }, [filter, rankMode, refreshKey, page]);
 
 const totalReactions = (id) => {
-const r = reactions[id] || {};
-return EMOJIS.reduce((s, e) => s + (r[e] || 0), 0);
+  const r = reactions[id] || {};
+  return EMOJIS.reduce((s, e) => s + (r[e] || 0), 0);
 };
 
 const sorted = React.useMemo(() => {
-const arr = [...couples];
-if (rankMode === "popular") return arr.sort((a,b) => totalReactions(b.id) - totalReactions(a.id));
-if (rankMode === "rising") return arr.filter(c => (Date.now() - new Date(c.created_at).getTime()) < 7*24*60*60*1000).sort((a,b) => (b.bond_score||0) - (a.bond_score||0));
-return arr.sort((a,b) => (b.bond_score||0) - (a.bond_score||0));
+  const arr = [...couples];
+  if (rankMode === "popular") return arr.sort((a,b) => totalReactions(b.id) - totalReactions(a.id));
+  if (rankMode === "rising") return arr
+    .filter(c => (Date.now() - new Date(c.created_at).getTime()) < 7*24*60*60*1000)
+    .sort((a,b) => (b.bond_score||0) - (a.bond_score||0));
+  return arr.sort((a,b) => (b.bond_score||0) - (a.bond_score||0));
 }, [couples, reactions, rankMode]);
 
 const visible = React.useMemo(() => {
-const q = search.trim().toLowerCase();
-if (!q) return sorted;
-return sorted.filter(c => {
-const tokens = [
-c.couple_name,
-c.partner_username,
-c.partner1_name,
-c.partner2_name,
-c.couple_type,
-c.institution,
-c.locality,
-c.declared_by === "partner" ? "self-declared" : null,
-c.declared_by === "outsider" ? "nominated" : null,
-].filter(Boolean).map(v => v.toLowerCase());
-return tokens.some(t => t.includes(q));
-});
+  const q = search.trim().toLowerCase();
+  if (!q) return sorted;
+  return sorted.filter(c => {
+    const tokens = [
+      c.couple_name, c.partner_username, c.partner1_name, c.partner2_name,
+      c.couple_type, c.institution, c.locality,
+      c.declared_by === "partner"  ? "self-declared" : null,
+      c.declared_by === "outsider" ? "nominated"     : null,
+    ].filter(Boolean).map(v => v.toLowerCase());
+    return tokens.some(t => t.includes(q));
+  });
 }, [sorted, search]);
+
 async function recomputeEngagementScore(coupleId) {
-// Only runs for outsider/3rd-party declared couples
-try {
-const [{ data: rxns }, { data: cmts }, { data: ships }] = await Promise.all([
-window.supabaseClient.from("reactions").select("id", { count:"exact" }).eq("target_type","couple").eq("target_id", coupleId),
-window.supabaseClient.from("couple_comments").select("id", { count:"exact" }).eq("couple_id", coupleId).eq("target_type","couple"),
-window.supabaseClient.from("ship_it").select("sails").or(`person_a_bond_id.eq.${coupleId},person_b_bond_id.eq.${coupleId}`)
-]);
-const rCount = rxns?.length || 0;
-const cCount = cmts?.length || 0;
-const sCount = (ships || []).reduce((s, x) => s + (x.sails || 0), 0);
-const newScore = Math.min(Math.round(50 + rCount * 0.5 + cCount * 1.5 + sCount * 2), 95);
-await window.supabaseClient.from("couples").update({ bond_score: newScore, last_computed_at: new Date().toISOString() }).eq("id", coupleId);
-// Update local state instantly
-setCouples(prev => prev.map(c => c.id === coupleId ? { ...c, bond_score: newScore } : c));
-} catch(e) { console.warn("[engagement score] update failed", e); }
+  try {
+    const [{ data: rxns }, { data: cmts }, { data: ships }] = await Promise.all([
+      window.supabaseClient.from("reactions").select("id", { count:"exact" }).eq("target_type","couple").eq("target_id", coupleId),
+      window.supabaseClient.from("couple_comments").select("id", { count:"exact" }).eq("couple_id", coupleId).eq("target_type","couple"),
+      window.supabaseClient.from("ship_it").select("sails").or(`person_a_bond_id.eq.${coupleId},person_b_bond_id.eq.${coupleId}`),
+    ]);
+    const rCount = rxns?.length || 0;
+    const cCount = cmts?.length || 0;
+    const sCount = (ships || []).reduce((s, x) => s + (x.sails || 0), 0);
+    const newScore = Math.min(Math.round(50 + rCount * 0.5 + cCount * 1.5 + sCount * 2), 95);
+    await window.supabaseClient.from("couples").update({ bond_score: newScore, last_computed_at: new Date().toISOString() }).eq("id", coupleId);
+    setCouples(prev => prev.map(c => c.id === coupleId ? { ...c, bond_score: newScore } : c));
+  } catch(e) { console.warn("[engagement score] update failed", e); }
 }
 
 async function handleReact(coupleId, emoji) {
-const uid = window.currentUser?.id ||
-localStorage.getItem("bond_guest_uuid");
-if (!uid) return;
-const prev = myReactions[coupleId];
-const isSame = prev === emoji;
-const next = isSame ? null : emoji;
-setMyReactions(p => ({ ...p, [coupleId]: next }));
-setReactions(p => {
-const r = { ...p[coupleId] };
-if (prev && r[prev]) r[prev] = Math.max(0, r[prev] - 1);
-if (!isSame) r[emoji] = (r[emoji] || 0) + 1;
-return { ...p, [coupleId]: r };
-});
-try {
-const session = await window.supabaseClient.auth.getSession();
-const token = session?.data?.session?.access_token ?? window.SUPABASE_ANON_KEY;
-await fetch(`${window.SUPABASE_URL}/functions/v1/api-reactions`, {
-method: "POST",
-headers: {
-"Content-Type": "application/json",
-"Authorization": `Bearer ${token}`
-},
-body: JSON.stringify({ targetId: coupleId, targetType: "couple", emoji }),
-});
-} catch(e) { console.warn("[reaction] sync failed", e); }
-// Recompute score for outsider couples after reaction
-const c = couples.find(x => x.id === coupleId);
-if (c?.declared_by === "outsider") recomputeEngagementScore(coupleId);
+  const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid");
+  if (!uid) return;
+  const prev = myReactions[coupleId];
+  const isSame = prev === emoji;
+  const next = isSame ? null : emoji;
+  setMyReactions(p => ({ ...p, [coupleId]: next }));
+  setReactions(p => {
+    const r = { ...p[coupleId] };
+    if (prev && r[prev]) r[prev] = Math.max(0, r[prev] - 1);
+    if (!isSame) r[emoji] = (r[emoji] || 0) + 1;
+    return { ...p, [coupleId]: r };
+  });
+  try {
+    const session = await window.supabaseClient.auth.getSession();
+    const token = session?.data?.session?.access_token ?? window.SUPABASE_ANON_KEY;
+    await fetch(`${window.SUPABASE_URL}/functions/v1/api-reactions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ targetId: coupleId, targetType: "couple", emoji }),
+    });
+  } catch(e) { console.warn("[reaction] sync failed", e); }
+  const c = couples.find(x => x.id === coupleId);
+  if (c?.declared_by === "outsider") recomputeEngagementScore(coupleId);
 }
+
 return (
-<div style={{ padding:"0 16px" }}>
-<div style={{ position:"relative", marginBottom:12 }}>
-<input type="text" value={search} onChange={e => setSearch(e.target.value)}
-placeholder="Search couples, type, city, college…"
-style={{ width:"100%", boxSizing:"border-box", background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.09)", borderRadius:14, padding:"11px 40px 11px 16px", fontSize:13, color:"#fff", outline:"none", transition:"border-color 0.2s", fontFamily:"inherit" }}
-onFocus={e => e.target.style.borderColor="rgba(248,113,113,0.35)"}
-onBlur={e => e.target.style.borderColor="rgba(255,255,255,0.09)"}
-/>
-{search
-? <button onClick={() => setSearch("")} style={{ position:"absolute", right:14, top:"50%", transform:"translateY(-50%)", background:"rgba(255,255,255,0.12)", border:"none", color:"rgba(255,255,255,0.7)", cursor:"pointer", width:20, height:20, borderRadius:999, fontSize:12, display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>×</button>
-: <span style={{ position:"absolute", right:14, top:"50%", transform:"translateY(-50%)", color:"rgba(255,255,255,0.2)", fontSize:14, pointerEvents:"none" }}>⌕</span>
-}
-</div>
-<div style={{ display:"flex", gap:8, marginBottom:14, alignItems:"center" }}>
-<div style={{ position:"relative", flex:1 }}>
-<select value={filter} onChange={e => setFilter(e.target.value)}
-style={{ width:"100%", appearance:"none", background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.09)", color:"#fff", fontSize:13, borderRadius:12, padding:"9px 30px 9px 14px", outline:"none", cursor:"pointer", fontFamily:"inherit" }}>
-{TYPES.map(t => <option key={t} value={t} style={{ background:"#0f172a" }}>{t === "all" ? "All Types" : t}</option>)}
-</select>
-<span style={{ position:"absolute", right:11, top:"50%", transform:"translateY(-50%)", color:"rgba(255,255,255,0.25)", fontSize:10, pointerEvents:"none" }}>▾</span>
-</div>
-<div style={{ display:"flex", borderRadius:12, overflow:"hidden", border:"1px solid rgba(255,255,255,0.09)", flexShrink:0 }}>
-{[{ id:"bond", label:"🏅 Bond" }, { id:"popular", label:"❤️ Hot" }, { id:"rising", label:"🌱 New" }].map(m => (
-<button key={m.id} onClick={() => { setRankMode(m.id); setPage(0); }}
-style={{ padding:"8px 12px", fontSize:11, fontWeight:600, cursor:"pointer", border:"none", fontFamily:"inherit", background: rankMode===m.id ? "linear-gradient(135deg,#f87171,#fb923c)" : "rgba(255,255,255,0.04)", color: rankMode===m.id ? "#fff" : "rgba(255,255,255,0.38)", transition:"all 0.15s" }}>
-{m.label}
-</button>
-))}
-</div>
-<button onClick={() => setRefreshKey(k => k+1)} style={{ width:36, height:36, borderRadius:10, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)", color:"rgba(255,255,255,0.35)", cursor:"pointer", fontSize:15, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>↻</button>
-</div>
-{rankMode === "rising" && !loading && <div style={{ fontSize:11, color:"rgba(52,211,153,0.6)", marginBottom:10, fontWeight:600 }}>🌱 New couples this week — sorted by BondScore</div>}
+  <div style={{ padding:"0 16px" }}>
+    {/* Search */}
+    <div style={{ position:"relative", marginBottom:12 }}>
+      <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+        placeholder="Search couples, type, city, college…"
+        style={{ width:"100%", boxSizing:"border-box",
+          background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.09)",
+          borderRadius:14, padding:"11px 40px 11px 16px", fontSize:13, color:"#fff",
+          outline:"none", transition:"border-color 0.2s", fontFamily:"inherit" }}
+        onFocus={e => e.target.style.borderColor="rgba(248,113,113,0.35)"}
+        onBlur={e  => e.target.style.borderColor="rgba(255,255,255,0.09)"}
+      />
+      {search
+        ? <button onClick={() => setSearch("")} style={{ position:"absolute", right:14, top:"50%",
+            transform:"translateY(-50%)", background:"rgba(255,255,255,0.12)", border:"none",
+            color:"rgba(255,255,255,0.7)", cursor:"pointer", width:20, height:20,
+            borderRadius:999, fontSize:12, display:"flex", alignItems:"center",
+            justifyContent:"center", padding:0 }}>×</button>
+        : <span style={{ position:"absolute", right:14, top:"50%",
+            transform:"translateY(-50%)", color:"rgba(255,255,255,0.2)",
+            fontSize:14, pointerEvents:"none" }}>⌕</span>
+      }
+    </div>
+
+    {/* Filter + rank + refresh */}
+    <div style={{ display:"flex", gap:8, marginBottom:14, alignItems:"center" }}>
+      <div style={{ position:"relative", flex:1 }}>
+        <select value={filter} onChange={e => setFilter(e.target.value)}
+          style={{ width:"100%", appearance:"none",
+            background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.09)",
+            color:"#fff", fontSize:13, borderRadius:12, padding:"9px 30px 9px 14px",
+            outline:"none", cursor:"pointer", fontFamily:"inherit" }}>
+          {TYPES.map(t => <option key={t} value={t} style={{ background:"#0f172a" }}>{t === "all" ? "All Types" : t}</option>)}
+        </select>
+        <span style={{ position:"absolute", right:11, top:"50%", transform:"translateY(-50%)",
+          color:"rgba(255,255,255,0.25)", fontSize:10, pointerEvents:"none" }}>▾</span>
+      </div>
+      <div style={{ display:"flex", borderRadius:12, overflow:"hidden", border:"1px solid rgba(255,255,255,0.09)", flexShrink:0 }}>
+        {[{ id:"bond", label:"🏅 Bond" }, { id:"popular", label:"❤️ Hot" }, { id:"rising", label:"🌱 New" }].map(m => (
+          <button key={m.id} onClick={() => { setRankMode(m.id); setPage(0); }}
+            style={{ padding:"8px 12px", fontSize:11, fontWeight:600, cursor:"pointer", border:"none",
+              fontFamily:"inherit",
+              background: rankMode===m.id ? "linear-gradient(135deg,#f87171,#fb923c)" : "rgba(255,255,255,0.04)",
+              color: rankMode===m.id ? "#fff" : "rgba(255,255,255,0.38)", transition:"all 0.15s" }}>
+            {m.label}
+          </button>
+        ))}
+      </div>
+      <button onClick={() => setRefreshKey(k => k+1)}
+        style={{ width:36, height:36, borderRadius:10, background:"rgba(255,255,255,0.05)",
+          border:"1px solid rgba(255,255,255,0.09)", color:"rgba(255,255,255,0.35)",
+          cursor:"pointer", fontSize:15, flexShrink:0,
+          display:"flex", alignItems:"center", justifyContent:"center" }}>↻</button>
+    </div>
+
+    {rankMode === "rising" && !loading && (
+      <div style={{ fontSize:11, color:"rgba(52,211,153,0.6)", marginBottom:10, fontWeight:600 }}>
+        🌱 New couples this week — sorted by BondScore
+      </div>
+    )}
+
+
 {(() => {
-// Not yet loaded from server — show blurred placeholders instantly
-if (!realLoaded && visible.length === 0) {
-return (
-<div style={{ position: "relative" }}>
-  {/* gradient overlay to signal "more below" */}
-  <div style={{
-    position: "absolute", inset: 0, zIndex: 1,
-    background: "linear-gradient(180deg, transparent 55%, rgba(2,6,23,0.9) 100%)",
-    pointerEvents: "none", borderRadius: 18
-  }} />
-  {PLACEHOLDER_COUPLES.map(c => (
-    <div key={c.id} style={{ opacity: 0.38, filter: "blur(0.6px)", pointerEvents: "none",
-      transform: "scale(0.99)", marginBottom: 10 }}>
+  // Still fetching — show blurred shimmer placeholders
+  if (!realLoaded && visible.length === 0) {
+    return (
+      <div style={{ position:"relative" }}>
+        <div style={{
+          position:"absolute", inset:0, zIndex:1,
+          background:"linear-gradient(180deg, transparent 55%, rgba(2,6,23,0.9) 100%)",
+          pointerEvents:"none", borderRadius:18
+        }} />
+        {PLACEHOLDER_COUPLES.map(c => (
+          <div key={c.id} style={{ opacity:0.38, filter:"blur(0.6px)",
+            pointerEvents:"none", transform:"scale(0.99)", marginBottom:10 }}>
+            <CoupleCard couple={c} rank={0} total={0}
+              reactions={{}} myReaction={null} commentCount={0}
+              communityPhotoCount={0} hasStatus={false}
+              onReact={() => {}} onSelect={() => {}} />
+          </div>
+        ))}
+        <div style={{
+          position:"absolute", bottom:16, left:0, right:0, zIndex:2,
+          textAlign:"center", fontSize:11, color:"rgba(248,113,113,0.55)",
+          fontWeight:600, letterSpacing:"0.06em"
+        }}>
+          Loading live couples…
+        </div>
+      </div>
+    );
+  }
+
+  // ── LOADED BUT DB IS EMPTY → show placeholder couples as real full cards ──
+  if (realLoaded && visible.length === 0 && !search.trim()) {
+    return (
+      <div>
+        {/* Banner so users know these are examples */}
+     
+{PLACEHOLDER_COUPLES.map((c, i) => (
+  <div key={c.id} className="bond-fade-up" style={{ animationDelay:`${i * 35}ms` }}>
+    <CoupleCard
+      couple={c}
+      rank={i + 1}
+      total={PLACEHOLDER_COUPLES.length}
+      reactions={localReactions[c.id] || {}}         // ← was {}
+      myReaction={localMyReactions[c.id] || null}    // ← was null
+      commentCount={0}
+      communityPhotoCount={0}
+      hasStatus={false}
+      onReact={(emoji) => handleLocalReact(c.id, emoji)}  // ← was () => {}
+      onSelect={(c) => setSelectedCouple(c)}
+    />
+  </div>
+))}
+      </div>
+    );
+  }
+
+  // Search returned nothing
+  if (realLoaded && visible.length === 0 && search.trim()) {
+    return (
+      <div style={{ textAlign:"center", padding:"60px 0" }}>
+        <div style={{ fontSize:20, color:"rgba(255,255,255,0.08)", marginBottom:8 }}>◇</div>
+        <div style={{ color:"rgba(255,255,255,0.25)", fontSize:14 }}>
+          No couples match your search
+        </div>
+      </div>
+    );
+  }
+
+  // Normal render — real DB cards
+  return visible.map((couple, i) => (
+    <div key={couple.id} className="bond-fade-up" style={{ animationDelay:`${i * 35}ms` }}>
       <CoupleCard
-        couple={c}
-        rank={0} total={0}
-        reactions={{}} myReaction={null} commentCount={0}
-        hasStatus={false}
-        onReact={() => {}} onSelect={() => {}}
+        couple={couple}
+        rank={sorted.indexOf(couple) + 1}
+        total={sorted.length}
+        reactions={reactions[couple.id] || {}}
+        myReaction={myReactions[couple.id] || null}
+        commentCount={commentCounts[couple.id] || 0}
+        communityPhotoCount={photoCounts[couple.id] || 0}
+        hasStatus={statusIds.has(couple.id)}
+        onReact={(emoji) => handleReact(couple.id, emoji)}
+        onSelect={setSelectedCouple}
       />
     </div>
-  ))}
-  <div style={{
-    position: "absolute", bottom: 16, left: 0, right: 0, zIndex: 2,
-    textAlign: "center", fontSize: 11,
-    color: "rgba(248,113,113,0.55)", fontWeight: 600, letterSpacing: "0.06em"
-  }}>Loading live couples…</div>
-</div>
-);
-}
-
-// Loaded but nothing matches search/filter
-if (realLoaded && visible.length === 0) {
-return (
-<div style={{ textAlign: "center", padding: "60px 0" }}>
-  <div style={{ fontSize: 20, color: "rgba(255,255,255,0.08)", marginBottom: 8 }}>◇</div>
-  <div style={{ color: "rgba(255,255,255,0.25)", fontSize: 14 }}>
-    {search.trim() ? "No couples match your search" : "No couples yet"}
-  </div>
-</div>
-);
-}
-
-// Normal render — real cards
-return visible.map((couple, i) => (
-<div key={couple.id} className="bond-fade-up" style={{ animationDelay: `${i * 35}ms` }}>
-<CoupleCard
-  couple={couple}
-  rank={sorted.indexOf(couple) + 1}
-  total={sorted.length}
-  reactions={reactions[couple.id] || {}}
-  
-  myReaction={myReactions[couple.id] || null}
-  commentCount={commentCounts[couple.id] || 0}
-  hasStatus={statusIds.has(couple.id)}
-  onReact={(emoji) => handleReact(couple.id, emoji)}
-  onSelect={setSelectedCouple}
-/>
-</div>
-));
+  ));
 })()}
 
-{/* Load more */}
-{hasMore && !loading && (
-  <button
-    onClick={() => setPage(p => p + 1)}
-    style={{
-      width:"100%", padding:"12px", borderRadius:14, marginTop:8,
-      background:"rgba(255,255,255,0.05)",
-      border:"1px solid rgba(255,255,255,0.09)",
-      color:"rgba(255,255,255,0.4)", fontSize:13, fontWeight:600,
-      cursor:"pointer", fontFamily:"inherit"
-    }}>
-    Load more ↓
-  </button>
-)}
+    {/* Load more */}
+    {hasMore && !loading && (
+      <button onClick={() => setPage(p => p + 1)}
+        style={{ width:"100%", padding:"12px", borderRadius:14, marginTop:8,
+          background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)",
+          color:"rgba(255,255,255,0.4)", fontSize:13, fontWeight:600,
+          cursor:"pointer", fontFamily:"inherit" }}>
+        Load more ↓
+      </button>
+    )}
 
-{selectedCouple && (
-  <CoupleDetailModal couple={selectedCouple} onClose={() => setSelectedCouple(null)} />
-)}
-</div>
+    {selectedCouple && (
+      <CoupleDetailModal couple={selectedCouple} onClose={() => setSelectedCouple(null)} />
+    )}
+  </div>
 );
 }
+
 /* ============================================================
 3. PASTE after CoupleFeed → function CoupleCard()
 ============================================================ */
@@ -6681,7 +7224,14 @@ const [comments, setComments] = React.useState([]);
 const [text, setText] = React.useState("");
 const [loading, setLoading] = React.useState(true);
 const [posting, setPosting] = React.useState(false);
-
+if (String(targetId).startsWith("__p")) {
+    return (
+      <div style={{ padding:"16px", textAlign:"center",
+        fontSize:12, color:"rgba(255,255,255,0.2)", fontStyle:"italic" }}>
+        Comments available on real couple profiles only.
+      </div>
+    );
+  }
 React.useEffect(() => {
 let mounted = true;
 async function load() {
@@ -6988,22 +7538,28 @@ return (
 </div>
 );
 }
+
+// ============================================================
+// 2. CoupleDetailModal — FULL CORRECTED VERSION
+// ============================================================
+
 function CoupleDetailModal({ couple, onClose }) {
 const STORY_QUESTIONS = [
-{ key:"how_met",        q:"How did you two actually meet?" },
-{ key:"first_noticed",  q:"First thing you noticed about them?" },
-{ key:"said_it_first",  q:"Who said \u201cI like you\u201d first?" },
-{ key:"chaotic_moment", q:"Most chaotic thing you\u2019ve done together?" },
-{ key:"weird_common",   q:"Weirdest thing you have in common?" },
-{ key:"knew_different", q:"The moment you knew this was different?" },
-{ key:"friend_word",    q:"One word your friends use to describe you two?" },
-{ key:"ignored_flag",   q:"Biggest red flag you ignored? \uD83D\uDE05" },
-{ key:"argue_about",    q:"Your go-to argument topic?" },
-{ key:"movie_genre",    q:"If your relationship was a movie genre?" },
-{ key:"best_trip",      q:"Best trip or adventure together?" },
-{ key:"annoy_each",     q:"How do you annoy each other the most?" },
+  { key:"how_met",        q:"How did you two actually meet?" },
+  { key:"first_noticed",  q:"First thing you noticed about them?" },
+  { key:"said_it_first",  q:"Who said \u201cI like you\u201d first?" },
+  { key:"chaotic_moment", q:"Most chaotic thing you\u2019ve done together?" },
+  { key:"weird_common",   q:"Weirdest thing you have in common?" },
+  { key:"knew_different", q:"The moment you knew this was different?" },
+  { key:"friend_word",    q:"One word your friends use to describe you two?" },
+  { key:"ignored_flag",   q:"Biggest red flag you ignored? \uD83D\uDE05" },
+  { key:"argue_about",    q:"Your go-to argument topic?" },
+  { key:"movie_genre",    q:"If your relationship was a movie genre?" },
+  { key:"best_trip",      q:"Best trip or adventure together?" },
+  { key:"annoy_each",     q:"How do you annoy each other the most?" },
 ];
 
+// existing state
 const [challenges, setChallenges] = React.useState([]);
 const [stories, setStories] = React.useState({});
 const [editKey, setEditKey] = React.useState(null);
@@ -7011,297 +7567,469 @@ const [editVal, setEditVal] = React.useState("");
 const [saving, setSaving] = React.useState(false);
 const [loadingAll, setLoadingAll] = React.useState(true);
 
+// ── NEW: community photo state ──
+const [communityPhotos, setCommunityPhotos] = React.useState([]);
+const [showPhotoUpload, setShowPhotoUpload] = React.useState(false);
+const [uploadStory, setUploadStory] = React.useState("");
+const [uploadChallenge, setUploadChallenge] = React.useState("");
+const [uploadFile, setUploadFile] = React.useState(null);
+const [uploadPreview, setUploadPreview] = React.useState(null);
+const [uploadSaving, setUploadSaving] = React.useState(false);
+
 const isOwner = couple.creator_id &&
-(couple.creator_id === window.currentUser?.id ||
-couple.creator_id === localStorage.getItem("bond_guest_uuid"));
+  (couple.creator_id === window.currentUser?.id ||
+   couple.creator_id === localStorage.getItem("bond_guest_uuid"));
 
 const bond = Math.round(couple.bond_score || 0);
 const bondGrad = bond >= 80 ? "linear-gradient(135deg,#34d399,#10b981)"
-: bond >= 55 ? "linear-gradient(135deg,#f87171,#fb923c)"
-: "linear-gradient(135deg,#6b7280,#9ca3af)";
+  : bond >= 55 ? "linear-gradient(135deg,#f87171,#fb923c)"
+  : "linear-gradient(135deg,#6b7280,#9ca3af)";
 const TYPE_SYM = { Romantic:"\u2661", Engaged:"\u25C7", Married:"\u25CB",
-"Long Distance":"\u2197", Situationship:"\u223F", "Friends to Lovers":"\u21DD" };
+  "Long Distance":"\u2197", Situationship:"\u223F", "Friends to Lovers":"\u21DD" };
 const sym = TYPE_SYM[couple.couple_type] || "\u25C7";
 const TYPE_COLORS = {
-"Romantic":{ bg:"rgba(244,114,182,0.12)", color:"#f9a8d4" },
-"Engaged":{ bg:"rgba(167,139,250,0.12)", color:"#c4b5fd" },
-"Married":{ bg:"rgba(251,191,36,0.12)", color:"#fde68a" },
-"Long Distance":{ bg:"rgba(96,165,250,0.12)", color:"#93c5fd" },
-"Situationship":{ bg:"rgba(251,146,60,0.12)", color:"#fdba74" },
-"Friends to Lovers":{ bg:"rgba(52,211,153,0.12)", color:"#6ee7b7" },
+  "Romantic":       { bg:"rgba(244,114,182,0.12)", color:"#f9a8d4" },
+  "Engaged":        { bg:"rgba(167,139,250,0.12)", color:"#c4b5fd" },
+  "Married":        { bg:"rgba(251,191,36,0.12)",  color:"#fde68a" },
+  "Long Distance":  { bg:"rgba(96,165,250,0.12)",  color:"#93c5fd" },
+  "Situationship":  { bg:"rgba(251,146,60,0.12)",  color:"#fdba74" },
+  "Friends to Lovers":{ bg:"rgba(52,211,153,0.12)", color:"#6ee7b7" },
 };
 const tc = TYPE_COLORS[couple.couple_type] || { bg:"rgba(255,255,255,0.06)", color:"rgba(255,255,255,0.4)" };
 const displayName = couple.couple_name || couple.partner_username || "Anonymous";
 const locationLabel = [couple.institution, couple.locality].filter(Boolean).join(" \u00B7 ");
 
+// ── LOAD: existing + community photos ──
 React.useEffect(() => {
-let mounted = true;
-async function load() {
-const [chRes, stRes] = await Promise.all([
-window.supabaseClient.from("couple_challenges").select("challenge_key,xp_awarded,proof_url,proof_note,completed_at")
-.eq("couple_id", couple.id).order("completed_at", { ascending:false }),
-window.supabaseClient.from("couple_stories").select("question_key,answer")
-.eq("couple_id", couple.id)
-]);
-if (!mounted) return;
-setChallenges(chRes.data || []);
-const stMap = {};
-(stRes.data || []).forEach(s => { stMap[s.question_key] = s.answer; });
-setStories(stMap);
-setLoadingAll(false);
-}
-load();
-return () => { mounted = false; };
+  let mounted = true;
+  async function load() {
+      if (couple._isPlaceholder) {
+    setLoadingAll(false);
+    return;
+  }
+    const [chRes, stRes, photoRes] = await Promise.all([
+      window.supabaseClient.from("couple_challenges")
+        .select("challenge_key,xp_awarded,proof_url,proof_note,completed_at")
+        .eq("couple_id", couple.id).order("completed_at", { ascending:false }),
+      window.supabaseClient.from("couple_stories")
+        .select("question_key,answer").eq("couple_id", couple.id),
+      window.supabaseClient.from("couple_community_photos")
+        .select("*").eq("couple_id", couple.id)
+        .order("created_at", { ascending:false }).limit(20),
+    ]);
+    if (!mounted) return;
+    setChallenges(chRes.data || []);
+    const stMap = {};
+    (stRes.data || []).forEach(s => { stMap[s.question_key] = s.answer; });
+    setStories(stMap);
+    setCommunityPhotos(photoRes.data || []);
+    setLoadingAll(false);
+  }
+  load();
+  return () => { mounted = false; };
 }, [couple.id]);
 
 async function saveStory() {
-if (!editVal.trim() || !editKey) return;
-setSaving(true);
-await window.supabaseClient.from("couple_stories").upsert({
-couple_id: couple.id, question_key: editKey, answer: editVal.trim()
-}, { onConflict:"couple_id,question_key" });
-setStories(prev => ({ ...prev, [editKey]: editVal.trim() }));
-setEditKey(null); setEditVal(""); setSaving(false);
+  if (!editVal.trim() || !editKey) return;
+  setSaving(true);
+  await window.supabaseClient.from("couple_stories").upsert({
+    couple_id: couple.id, question_key: editKey, answer: editVal.trim()
+  }, { onConflict:"couple_id,question_key" });
+  setStories(prev => ({ ...prev, [editKey]: editVal.trim() }));
+  setEditKey(null); setEditVal(""); setSaving(false);
 }
 
-// Dedupe challenges - only latest per key for once/milestone
+// ── NEW: community photo upload handler ──
+async function handleCommunityPhotoUpload() {
+  if (!uploadFile) return;
+  setUploadSaving(true);
+  try {
+    const compressed = await compressImage(uploadFile, 800, 0.8);
+    const url = await uploadToStorage("bond-uploads", compressed, "community/");
+    if (!url) { setUploadSaving(false); return; }
+    const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid");
+    const username = window.BOND_USERNAME ||
+      (window.currentUser?.email?.split("@")[0]) || "anon";
+    await window.supabaseClient.from("couple_community_photos").insert({
+      couple_id: couple.id,
+      uploader_id: uid,
+      uploader_username: username,
+      photo_url: url,
+      short_story: uploadStory.trim() || null,
+      challenge_tag: uploadChallenge.trim() || null,
+    });
+    setCommunityPhotos(prev => [{
+      id: Date.now(), couple_id: couple.id, uploader_username: username,
+      photo_url: url, short_story: uploadStory.trim(),
+      challenge_tag: uploadChallenge.trim(), created_at: new Date().toISOString()
+    }, ...prev]);
+    setShowPhotoUpload(false);
+    setUploadFile(null); setUploadPreview(null);
+    setUploadStory(""); setUploadChallenge("");
+  } catch(e) { console.warn("[communityPhoto] upload failed", e); }
+  setUploadSaving(false);
+}
+
+// dedupe challenges
 const seenKeys = new Set();
 const dedupedChallenges = challenges.filter(c => {
-const ch = COUPLE_CHALLENGES.find(x => x.key === c.challenge_key);
-if (!ch) return false;
-if (ch.cadence === "daily" || ch.cadence === "weekly" || ch.cadence === "monthly") return true;
-if (seenKeys.has(c.challenge_key)) return false;
-seenKeys.add(c.challenge_key); return true;
+  const ch = COUPLE_CHALLENGES.find(x => x.key === c.challenge_key);
+  if (!ch) return false;
+  if (ch.cadence === "daily" || ch.cadence === "weekly" || ch.cadence === "monthly") return true;
+  if (seenKeys.has(c.challenge_key)) return false;
+  seenKeys.add(c.challenge_key); return true;
 });
 
-const DIFF_COLORS = { easy:"rgba(52,211,153,0.7)", medium:"rgba(251,191,36,0.7)", hard:"rgba(248,113,113,0.7)", milestone:"rgba(167,139,250,0.7)" };
-
 return (
-<div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:1000,
-background:"rgba(0,0,0,0.75)", backdropFilter:"blur(8px)",
-display:"flex", alignItems:"flex-end", justifyContent:"center", padding:"0" }}>
-<div onClick={e => e.stopPropagation()}
-style={{ width:"100%", maxWidth:480, maxHeight:"92vh", overflowY:"auto",
-borderRadius:"24px 24px 0 0", background:"#0e0e12",
-border:"1px solid rgba(255,255,255,0.08)", borderBottom:"none",
-animation:"bond-fade-up 0.28s ease" }}>
+  <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:1000,
+    background:"rgba(0,0,0,0.75)", backdropFilter:"blur(8px)",
+    display:"flex", alignItems:"flex-end", justifyContent:"center", padding:"0" }}>
+    <div onClick={e => e.stopPropagation()}
+      style={{ width:"100%", maxWidth:480, maxHeight:"92vh", overflowY:"auto",
+        borderRadius:"24px 24px 0 0", background:"#0e0e12",
+        border:"1px solid rgba(255,255,255,0.08)", borderBottom:"none",
+        animation:"bond-fade-up 0.28s ease" }}>
 
-{/* Drag handle */}
-<div style={{ display:"flex", justifyContent:"center", padding:"12px 0 4px" }}>
-<div style={{ width:36, height:4, borderRadius:999, background:"rgba(255,255,255,0.12)" }} />
-</div>
-{/* Active statuses */}
-<CoupleStatus coupleId={couple.id} isOwner={false} />
-{/* Header */}
-<div style={{ padding:"12px 20px 0" }}>
-<div style={{ height:2, borderRadius:999, background:"linear-gradient(90deg,#f87171,#fb923c,#fbbf24)", marginBottom:16 }} />
-<div style={{ display:"flex", alignItems:"center", gap:14, marginBottom:16 }}>
-<div style={{ width:60, height:60, borderRadius:16, overflow:"hidden", flexShrink:0,
-background:tc.bg, border:`1px solid ${tc.color}33`,
-display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>
-{couple.avatar_url
-? <img src={couple.avatar_url} style={{ width:"100%", height:"100%", objectFit:"cover" }} loading="lazy" />
-: <span style={{ color:tc.color }}>{sym}</span>}
-</div>
-<div style={{ flex:1, minWidth:0 }}>
-<div style={{ fontSize:18, fontWeight:900, color:"#fff", letterSpacing:"-0.02em",
-overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{displayName}</div>
-<div style={{ display:"flex", gap:6, marginTop:5, flexWrap:"wrap", alignItems:"center" }}>
-<span style={{ fontSize:11, padding:"2px 10px", borderRadius:999, background:tc.bg, color:tc.color, fontWeight:700 }}>{sym} {couple.couple_type}</span>
-{locationLabel && <span style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>{locationLabel}</span>}
-</div>
-{/* Social links */}
-{couple.social_links && Object.keys(couple.social_links).some(k => couple.social_links[k]) && (
-<div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:10 }}>
-{[
-{ key:"instagram", label:"Instagram", icon:"📸" },
-{ key:"linkedin",  label:"LinkedIn",  icon:"💼" },
-{ key:"twitter",   label:"Twitter / X", icon:"🐦" },
-{ key:"other",     label:"Link",      icon:"🔗" },
-].filter(s => couple.social_links[s.key]).map(s => (
-<a key={s.key}
-  href={couple.social_links[s.key].startsWith("http")
-    ? couple.social_links[s.key]
-    : "https://" + couple.social_links[s.key]}
-  target="_blank" rel="noopener noreferrer"
-  style={{
-    display:"flex", alignItems:"center", gap:5,
-    padding:"6px 14px", borderRadius:999,
-    background:"rgba(255,255,255,0.06)",
-    border:"1px solid rgba(255,255,255,0.1)",
-    textDecoration:"none", fontSize:12, fontWeight:600,
-    color:"rgba(255,255,255,0.7)", cursor:"pointer"
-  }}>
-  <span>{s.icon}</span>
-  <span>{s.label}</span>
-</a>
-))}
-</div>
-)}
-</div>
-<div style={{ textAlign:"right", flexShrink:0 }}>
-<div style={{ fontSize:30, fontWeight:900, letterSpacing:"-0.03em",
-background:bondGrad, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>{bond}</div>
-<div style={{ fontSize:10, color:"rgba(255,255,255,0.25)" }}>bond</div>
-</div>
-</div>
+      {/* Drag handle */}
+      <div style={{ display:"flex", justifyContent:"center", padding:"12px 0 4px" }}>
+        <div style={{ width:36, height:4, borderRadius:999, background:"rgba(255,255,255,0.12)" }} />
+      </div>
 
-{/* Score trio */}
-<div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:16 }}>
-{[{ sym:"\u23C1", label:"Sync", val:couple.emotional_sync_score },
-{ sym:"\u2661", label:"Stable", val:couple.stability_score },
-{ sym:"\u25B3", label:"Growth", val:couple.growth_index }].map(s => (
-<div key={s.label} style={{ borderRadius:14, padding:"12px 6px", textAlign:"center",
-background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)" }}>
-<div style={{ fontSize:11, color:"rgba(255,255,255,0.2)", marginBottom:4 }}>{s.sym}</div>
-<div style={{ fontSize:18, fontWeight:800, color:"#fff" }}>{Math.round(s.val||0)}</div>
-<div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:2 }}>{s.label}</div>
-</div>
-))}
-</div>
-</div>
+      {/* Active statuses */}
+      <CoupleStatus coupleId={couple.id} isOwner={false} />
 
-{loadingAll ? (
-<div style={{ padding:"32px 0", textAlign:"center", color:"rgba(255,255,255,0.2)", fontSize:13 }}>Loading…</div>
-) : (
-<div style={{ padding:"0 20px 32px" }}>
-{/* Backstory */}
-{couple.backstory && (
-<div style={{ marginBottom:24, borderRadius:16,
-background:"rgba(248,113,113,0.05)",
-border:"1px solid rgba(248,113,113,0.12)",
-padding:16 }}>
-<div style={{ fontSize:11, fontWeight:700,
-color:"rgba(255,255,255,0.3)", letterSpacing:"0.1em",
-textTransform:"uppercase", marginBottom:10 }}>
-📖 Their story
-</div>
-<div style={{ fontSize:14, color:"rgba(255,255,255,0.8)",
-lineHeight:1.7, fontStyle:"italic" }}>
-"{couple.backstory}"
-</div>
-</div>
-)}
-{/* Challenges done */}
-<div style={{ marginBottom:24 }}>
-<div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.25)",
-letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12 }}>
-{"\u26A1"} Challenges completed · {dedupedChallenges.length}
-</div>
-{dedupedChallenges.length === 0 ? (
-<div style={{ fontSize:12, color:"rgba(255,255,255,0.2)", fontStyle:"italic" }}>No challenges completed yet.</div>
-) : (
-<div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-{dedupedChallenges.map((c, i) => {
-const ch = COUPLE_CHALLENGES.find(x => x.key === c.challenge_key);
-if (!ch) return null;
-return (
-<div key={i} style={{ borderRadius:12, background:"rgba(52,211,153,0.05)",
-border:"1px solid rgba(52,211,153,0.15)", overflow:"hidden" }}>
-<div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 12px" }}>
-<span style={{ fontSize:18, flexShrink:0 }}>{ch.icon}</span>
-<div style={{ flex:1, minWidth:0 }}>
-<div style={{ fontSize:13, fontWeight:700, color:"rgba(52,211,153,0.9)" }}>{ch.label}</div>
-<div style={{ fontSize:10, color:"rgba(255,255,255,0.25)", marginTop:1 }}>
-{ch.cadence} · +{c.xp_awarded} XP
-{c.proof_note && <span style={{ color:"rgba(255,255,255,0.35)" }}> · {c.proof_note}</span>}
-</div>
-</div>
-<span style={{ fontSize:10, padding:"2px 8px", borderRadius:999,
-background:"rgba(255,255,255,0.06)", color:"rgba(255,255,255,0.3)" }}>✓</span>
-</div>
-{c.proof_url && (
-<img src={c.proof_url} style={{ width:"100%", maxHeight:180, objectFit:"cover", display:"block" }} />
-)}
-</div>
-);
-})}
-</div>
-)}
-</div>
+      {/* Header */}
+      <div style={{ padding:"12px 20px 0" }}>
+        <div style={{ height:2, borderRadius:999, background:"linear-gradient(90deg,#f87171,#fb923c,#fbbf24)", marginBottom:16 }} />
+        <div style={{ display:"flex", alignItems:"center", gap:14, marginBottom:16 }}>
+          <div style={{ width:60, height:60, borderRadius:16, overflow:"hidden", flexShrink:0,
+            background:tc.bg, border:`1px solid ${tc.color}33`,
+            display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>
+            {couple.avatar_url
+              ? <img src={couple.avatar_url} style={{ width:"100%", height:"100%", objectFit:"cover" }} loading="lazy" />
+              : <span style={{ color:tc.color }}>{sym}</span>}
+          </div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:18, fontWeight:900, color:"#fff", letterSpacing:"-0.02em",
+              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{displayName}</div>
+            <div style={{ display:"flex", gap:6, marginTop:5, flexWrap:"wrap", alignItems:"center" }}>
+              <span style={{ fontSize:11, padding:"2px 10px", borderRadius:999,
+                background:tc.bg, color:tc.color, fontWeight:700 }}>{sym} {couple.couple_type}</span>
+              {locationLabel && <span style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>{locationLabel}</span>}
+            </div>
+            {/* Social links */}
+            {couple.social_links && Object.keys(couple.social_links).some(k => couple.social_links[k]) && (
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:10 }}>
+                {[
+                  { key:"instagram", label:"Instagram", icon:"📸" },
+                  { key:"linkedin",  label:"LinkedIn",  icon:"💼" },
+                  { key:"twitter",   label:"Twitter / X", icon:"🐦" },
+                  { key:"other",     label:"Link",      icon:"🔗" },
+                ].filter(s => couple.social_links[s.key]).map(s => (
+                  <a key={s.key}
+                    href={couple.social_links[s.key].startsWith("http")
+                      ? couple.social_links[s.key]
+                      : "https://" + couple.social_links[s.key]}
+                    target="_blank" rel="noopener noreferrer"
+                    style={{ display:"flex", alignItems:"center", gap:5,
+                      padding:"6px 14px", borderRadius:999,
+                      background:"rgba(255,255,255,0.06)",
+                      border:"1px solid rgba(255,255,255,0.1)",
+                      textDecoration:"none", fontSize:12, fontWeight:600,
+                      color:"rgba(255,255,255,0.7)", cursor:"pointer" }}>
+                    <span>{s.icon}</span><span>{s.label}</span>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ textAlign:"right", flexShrink:0 }}>
+            <div style={{ fontSize:30, fontWeight:900, letterSpacing:"-0.03em",
+              background:bondGrad, WebkitBackgroundClip:"text",
+              WebkitTextFillColor:"transparent" }}>{bond}</div>
+            <div style={{ fontSize:10, color:"rgba(255,255,255,0.25)" }}>bond</div>
+          </div>
+        </div>
 
-{/* Story Q&A */}
-<div>
-<div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.25)",
-letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12 }}>
-{"\uD83D\uDCAC"} Their story
-</div>
-<div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-{STORY_QUESTIONS.map(sq => {
-const answered = stories[sq.key];
-const isEditing = editKey === sq.key;
-if (!answered && !isOwner) return null;
-return (
-<div key={sq.key} style={{ borderRadius:12, background:"rgba(255,255,255,0.03)",
-border:"1px solid rgba(255,255,255,0.07)", overflow:"hidden" }}>
-<div style={{ padding:"10px 12px" }}>
-<div style={{ fontSize:11, color:"rgba(255,255,255,0.35)", fontWeight:600, marginBottom:6 }}>{sq.q}</div>
-{isEditing ? (
-<div>
-<textarea value={editVal} onChange={e => setEditVal(e.target.value)}
-placeholder="Answer…" maxLength={200}
-style={{ width:"100%", boxSizing:"border-box", background:"rgba(255,255,255,0.05)",
-border:"1px solid rgba(248,113,113,0.3)", borderRadius:8, padding:"8px 10px",
-fontSize:12, color:"#fff", outline:"none", fontFamily:"inherit",
-resize:"none", minHeight:60, lineHeight:1.5 }} />
-<div style={{ display:"flex", gap:6, marginTop:8 }}>
-<button onClick={() => { setEditKey(null); setEditVal(""); }}
-style={{ flex:1, padding:"6px", borderRadius:8, background:"rgba(255,255,255,0.05)",
-border:"1px solid rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.4)",
-fontSize:11, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>Cancel</button>
-<button onClick={saveStory} disabled={saving || !editVal.trim()}
-style={{ flex:2, padding:"6px", borderRadius:8,
-background: editVal.trim() ? "linear-gradient(135deg,#f87171,#fb923c)" : "rgba(255,255,255,0.05)",
-border:"none", color: editVal.trim() ? "#fff" : "rgba(255,255,255,0.2)",
-fontSize:11, fontWeight:700, cursor: editVal.trim() ? "pointer" : "default",
-fontFamily:"inherit" }}>{saving ? "Saving…" : "Save"}</button>
-</div>
-</div>
-) : answered ? (
-<div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:8 }}>
-<div style={{ fontSize:13, color:"#fff", lineHeight:1.5, flex:1 }}>{answered}</div>
-{isOwner && (
-<button onClick={() => { setEditKey(sq.key); setEditVal(answered); }}
-style={{ flexShrink:0, fontSize:10, color:"rgba(255,255,255,0.2)", background:"none",
-border:"none", cursor:"pointer", padding:"2px 6px", fontFamily:"inherit" }}>edit</button>
-)}
-</div>
-) : isOwner ? (
-<button onClick={() => { setEditKey(sq.key); setEditVal(""); }}
-style={{ fontSize:12, color:"rgba(248,113,113,0.5)", background:"none", border:"none",
-cursor:"pointer", fontFamily:"inherit", padding:0, fontWeight:600 }}>
-+ Answer this
-</button>
-) : null}
-</div>
-</div>
-);
-})}
-{isOwner && (
-<div style={{ fontSize:11, color:"rgba(255,255,255,0.15)", textAlign:"center", marginTop:8, lineHeight:1.6 }}>
-Your answers are public — anyone can see them when they tap your card.
-</div>
-)}
-</div>
-</div>
+        {/* Score trio */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:16 }}>
+          {[{ sym:"\u23C1", label:"Sync",   val:couple.emotional_sync_score },
+            { sym:"\u2661", label:"Stable", val:couple.stability_score },
+            { sym:"\u25B3", label:"Growth", val:couple.growth_index }].map(s => (
+            <div key={s.label} style={{ borderRadius:14, padding:"12px 6px", textAlign:"center",
+              background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)" }}>
+              <div style={{ fontSize:11, color:"rgba(255,255,255,0.2)", marginBottom:4 }}>{s.sym}</div>
+              <div style={{ fontSize:18, fontWeight:800, color:"#fff" }}>{Math.round(s.val||0)}</div>
+              <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
 
-</div>
-)}
+      {loadingAll ? (
+        <div style={{ padding:"32px 0", textAlign:"center", color:"rgba(255,255,255,0.2)", fontSize:13 }}>Loading…</div>
+      ) : (
+        <div style={{ padding:"0 20px 32px" }}>
 
-{/* Close */}
-<div style={{ padding:"0 20px 16px", borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:14 }}>
-<button onClick={onClose}
-style={{ width:"100%", padding:"12px", borderRadius:14, background:"rgba(255,255,255,0.05)",
-border:"1px solid rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.4)",
-fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
-Close
-</button>
-</div>
+          {/* Backstory */}
+          {couple.backstory && (
+            <div style={{ marginBottom:24, borderRadius:16,
+              background:"rgba(248,113,113,0.05)",
+              border:"1px solid rgba(248,113,113,0.12)", padding:16 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.3)",
+                letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10 }}>
+                📖 Their story
+              </div>
+              <div style={{ fontSize:14, color:"rgba(255,255,255,0.8)", lineHeight:1.7, fontStyle:"italic" }}>
+                "{couple.backstory}"
+              </div>
+            </div>
+          )}
 
-</div>
-</div>
+          {/* Challenges done */}
+          <div style={{ marginBottom:24 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.25)",
+              letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12 }}>
+              ⚡ Challenges completed · {dedupedChallenges.length}
+            </div>
+            {dedupedChallenges.length === 0 ? (
+              <div style={{ fontSize:12, color:"rgba(255,255,255,0.2)", fontStyle:"italic" }}>No challenges completed yet.</div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {dedupedChallenges.map((c, i) => {
+                  const ch = COUPLE_CHALLENGES.find(x => x.key === c.challenge_key);
+                  if (!ch) return null;
+                  return (
+                    <div key={i} style={{ borderRadius:12, background:"rgba(52,211,153,0.05)",
+                      border:"1px solid rgba(52,211,153,0.15)", overflow:"hidden" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 12px" }}>
+                        <span style={{ fontSize:18, flexShrink:0 }}>{ch.icon}</span>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:13, fontWeight:700, color:"rgba(52,211,153,0.9)" }}>{ch.label}</div>
+                          <div style={{ fontSize:10, color:"rgba(255,255,255,0.25)", marginTop:1 }}>
+                            {ch.cadence} · +{c.xp_awarded} XP
+                            {c.proof_note && <span style={{ color:"rgba(255,255,255,0.35)" }}> · {c.proof_note}</span>}
+                          </div>
+                        </div>
+                        <span style={{ fontSize:10, padding:"2px 8px", borderRadius:999,
+                          background:"rgba(255,255,255,0.06)", color:"rgba(255,255,255,0.3)" }}>✓</span>
+                      </div>
+                      {c.proof_url && (
+                        <img src={c.proof_url} style={{ width:"100%", maxHeight:180, objectFit:"cover", display:"block" }} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ── COMMUNITY SPOTTED PHOTOS ── */}
+          <div style={{ marginBottom:24 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.25)",
+                letterSpacing:"0.1em", textTransform:"uppercase" }}>
+                📸 Spotted by the community · {communityPhotos.length}
+              </div>
+              <button onClick={() => setShowPhotoUpload(v => !v)}
+                style={{ fontSize:11, padding:"4px 12px", borderRadius:999,
+                  background:"rgba(248,113,113,0.1)", border:"1px solid rgba(248,113,113,0.25)",
+                  color:"#fca5a5", cursor:"pointer", fontFamily:"inherit", fontWeight:700 }}>
+                + Add Photo
+              </button>
+            </div>
+
+            {/* Upload form */}
+            {showPhotoUpload && (
+              <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.08)",
+                borderRadius:16, padding:16, marginBottom:16 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:"rgba(255,255,255,0.6)", marginBottom:12 }}>
+                  Spotted them? Share the moment 👀
+                </div>
+                {/* File picker */}
+                <label style={{ display:"block", marginBottom:10, cursor:"pointer" }}>
+                  <div style={{ border:"1px dashed rgba(248,113,113,0.3)", borderRadius:12, padding:"20px",
+                    textAlign:"center",
+                    background: uploadPreview ? "transparent" : "rgba(248,113,113,0.04)" }}>
+                    {uploadPreview
+                      ? <img src={uploadPreview} style={{ maxWidth:"100%", maxHeight:160,
+                          borderRadius:10, objectFit:"cover" }} />
+                      : <div style={{ color:"rgba(255,255,255,0.25)", fontSize:12 }}>Tap to upload a photo</div>}
+                  </div>
+                  <input type="file" accept="image/*" style={{ display:"none" }}
+                    onChange={e => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      setUploadFile(f);
+                      const reader = new FileReader();
+                      reader.onload = ev => setUploadPreview(ev.target.result);
+                      reader.readAsDataURL(f);
+                    }} />
+                </label>
+                {/* Story */}
+                <textarea value={uploadStory} onChange={e => setUploadStory(e.target.value)}
+                  placeholder="Where did you spot them? (optional)" rows={2}
+                  style={{ width:"100%", boxSizing:"border-box",
+                    background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)",
+                    borderRadius:10, padding:"10px 12px", fontSize:13, color:"#fff",
+                    outline:"none", resize:"none", fontFamily:"inherit", marginBottom:10 }} />
+                {/* Challenge tag */}
+                <input value={uploadChallenge} onChange={e => setUploadChallenge(e.target.value)}
+                  placeholder="Tag a challenge (e.g. 'caught being cute') — optional"
+                  style={{ width:"100%", boxSizing:"border-box",
+                    background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)",
+                    borderRadius:10, padding:"10px 12px", fontSize:13, color:"#fff",
+                    outline:"none", fontFamily:"inherit", marginBottom:12 }} />
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={() => { setShowPhotoUpload(false); setUploadFile(null); setUploadPreview(null); setUploadStory(""); setUploadChallenge(""); }}
+                    style={{ flex:1, padding:"10px", borderRadius:12,
+                      background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)",
+                      color:"rgba(255,255,255,0.4)", fontSize:13, fontWeight:600,
+                      cursor:"pointer", fontFamily:"inherit" }}>
+                    Cancel
+                  </button>
+                  <button onClick={handleCommunityPhotoUpload}
+                    disabled={!uploadFile || uploadSaving}
+                    style={{ flex:2, padding:"10px", borderRadius:12,
+                      background:"linear-gradient(135deg,#f87171,#fb923c)", border:"none",
+                      color:"#fff", fontSize:13, fontWeight:800,
+                      cursor: (!uploadFile || uploadSaving) ? "default" : "pointer",
+                      opacity: (!uploadFile || uploadSaving) ? 0.6 : 1,
+                      fontFamily:"inherit" }}>
+                    {uploadSaving ? "Uploading…" : "📸 Share Spotted Photo"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Photo gallery */}
+            {communityPhotos.length === 0 ? (
+              <div style={{ fontSize:12, color:"rgba(255,255,255,0.2)", fontStyle:"italic",
+                textAlign:"center", padding:"16px 0" }}>
+                No community photos yet — be the first to spot them! 👀
+              </div>
+            ) : (
+              <div style={{ display:"flex", gap:10, overflowX:"auto", paddingBottom:8 }}>
+                {communityPhotos.map(photo => (
+                  <div key={photo.id} style={{ flexShrink:0, width:200,
+                    background:"rgba(255,255,255,0.04)", borderRadius:14,
+                    border:"1px solid rgba(255,255,255,0.08)", overflow:"hidden" }}>
+                    <img src={photo.photo_url}
+                      style={{ width:"100%", height:130, objectFit:"cover", display:"block" }} />
+                    <div style={{ padding:"10px 12px" }}>
+                      {photo.short_story && (
+                        <div style={{ fontSize:12, color:"rgba(255,255,255,0.7)",
+                          marginBottom:6, lineHeight:1.5 }}>
+                          "{photo.short_story}"
+                        </div>
+                      )}
+                      {photo.challenge_tag && (
+                        <span style={{ fontSize:10, padding:"2px 8px", borderRadius:999,
+                          background:"rgba(248,113,113,0.1)", color:"#fca5a5",
+                          border:"1px solid rgba(248,113,113,0.2)",
+                          display:"inline-block", marginBottom:6 }}>
+                          🏆 {photo.challenge_tag}
+                        </span>
+                      )}
+                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.25)" }}>
+                        by @{photo.uploader_username || "anon"}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Story Q&A */}
+          <div>
+            <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.25)",
+              letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12 }}>
+              💬 Their story
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {STORY_QUESTIONS.map(sq => {
+                const answered = stories[sq.key];
+                const isEditing = editKey === sq.key;
+                if (!answered && !isOwner) return null;
+                return (
+                  <div key={sq.key} style={{ borderRadius:12, background:"rgba(255,255,255,0.03)",
+                    border:"1px solid rgba(255,255,255,0.07)", overflow:"hidden" }}>
+                    <div style={{ padding:"10px 12px" }}>
+                      <div style={{ fontSize:11, color:"rgba(255,255,255,0.35)", fontWeight:600, marginBottom:6 }}>{sq.q}</div>
+                      {isEditing ? (
+                        <div>
+                          <textarea value={editVal} onChange={e => setEditVal(e.target.value)}
+                            placeholder="Answer…" maxLength={200}
+                            style={{ width:"100%", boxSizing:"border-box", background:"rgba(255,255,255,0.05)",
+                              border:"1px solid rgba(248,113,113,0.3)", borderRadius:8, padding:"8px 10px",
+                              fontSize:12, color:"#fff", outline:"none", fontFamily:"inherit",
+                              resize:"none", minHeight:60, lineHeight:1.5 }} />
+                          <div style={{ display:"flex", gap:6, marginTop:8 }}>
+                            <button onClick={() => { setEditKey(null); setEditVal(""); }}
+                              style={{ flex:1, padding:"6px", borderRadius:8,
+                                background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.08)",
+                                color:"rgba(255,255,255,0.4)", fontSize:11, fontWeight:600,
+                                cursor:"pointer", fontFamily:"inherit" }}>Cancel</button>
+                            <button onClick={saveStory} disabled={saving || !editVal.trim()}
+                              style={{ flex:2, padding:"6px", borderRadius:8,
+                                background: editVal.trim() ? "linear-gradient(135deg,#f87171,#fb923c)" : "rgba(255,255,255,0.05)",
+                                border:"none", color: editVal.trim() ? "#fff" : "rgba(255,255,255,0.2)",
+                                fontSize:11, fontWeight:700,
+                                cursor: editVal.trim() ? "pointer" : "default",
+                                fontFamily:"inherit" }}>{saving ? "Saving…" : "Save"}</button>
+                          </div>
+                        </div>
+                      ) : answered ? (
+                        <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:8 }}>
+                          <div style={{ fontSize:13, color:"#fff", lineHeight:1.5, flex:1 }}>{answered}</div>
+                          {isOwner && (
+                            <button onClick={() => { setEditKey(sq.key); setEditVal(answered); }}
+                              style={{ flexShrink:0, fontSize:10, color:"rgba(255,255,255,0.2)",
+                                background:"none", border:"none", cursor:"pointer",
+                                padding:"2px 6px", fontFamily:"inherit" }}>edit</button>
+                          )}
+                        </div>
+                      ) : isOwner ? (
+                        <button onClick={() => { setEditKey(sq.key); setEditVal(""); }}
+                          style={{ fontSize:12, color:"rgba(248,113,113,0.5)", background:"none",
+                            border:"none", cursor:"pointer", fontFamily:"inherit",
+                            padding:0, fontWeight:600 }}>
+                          + Answer this
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+              {isOwner && (
+                <div style={{ fontSize:11, color:"rgba(255,255,255,0.15)", textAlign:"center", marginTop:8, lineHeight:1.6 }}>
+                  Your answers are public — anyone can see them when they tap your card.
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* Close */}
+      <div style={{ padding:"0 20px 16px", borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:14 }}>
+        <button onClick={onClose}
+          style={{ width:"100%", padding:"12px", borderRadius:14,
+            background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.08)",
+            color:"rgba(255,255,255,0.4)", fontSize:13, fontWeight:600,
+            cursor:"pointer", fontFamily:"inherit" }}>
+          Close
+        </button>
+      </div>
+
+    </div>
+  </div>
 );
 }
+
+
 function StatusRingAvatar({ couple, size = 44, rcBorder, hasStatus = false }) {
 const [showStatus, setShowStatus] = React.useState(false);
 
@@ -7405,125 +8133,200 @@ border:"1px solid rgba(255,255,255,0.07)"
 </div>
 );
 }
+
+// ============================================================
+// 3. CoupleCard — FULL CORRECTED VERSION
+// ============================================================
+
 function CoupleCard({ couple, rank, total, reactions, myReaction,
-commentCount, hasStatus, onReact, onSelect }) {
+  commentCount, hasStatus, onReact, onSelect, communityPhotoCount = 0 }) {
+
 const EMOJIS = ["\u2764\uFE0F","\uD83D\uDE0D","\uD83D\uDD25","\uD83D\uDCAF","\uD83E\uDD79"];
 const bond = Math.round(couple.bond_score || 0);
 const percentile = total > 1 ? Math.round(((total - rank + 1) / total) * 100) : 100;
 const isTop3 = rank <= 3;
 const displayName = couple.couple_name || couple.partner_username || "Anonymous";
 const [showComments, setShowComments] = React.useState(false);
+
 const RANK_COLORS = {
-1: { border:"rgba(251,191,36,0.35)", accent:"#fbbf24", crown:"\uD83D\uDC51" },
-2: { border:"rgba(192,192,192,0.25)", accent:"#9ca3af", crown:"\uD83E\uDD48" },
-3: { border:"rgba(251,146,60,0.3)", accent:"#fb923c", crown:"\uD83E\uDD49" },
+  1: { border:"rgba(251,191,36,0.35)",  accent:"#fbbf24", crown:"\uD83D\uDC51" },
+  2: { border:"rgba(192,192,192,0.25)", accent:"#9ca3af", crown:"\uD83E\uDD48" },
+  3: { border:"rgba(251,146,60,0.3)",   accent:"#fb923c", crown:"\uD83E\uDD49" },
 };
 const rc = RANK_COLORS[rank] || { border:"rgba(255,255,255,0.07)", accent:"rgba(255,255,255,0.25)", crown:null };
+
 const TYPE_COLORS = {
-"Romantic":{ bg:"rgba(244,114,182,0.1)", color:"#f9a8d4" },
-"Engaged":{ bg:"rgba(167,139,250,0.1)", color:"#c4b5fd" },
-"Married":{ bg:"rgba(251,191,36,0.1)", color:"#fde68a" },
-"Long Distance":{ bg:"rgba(96,165,250,0.1)", color:"#93c5fd" },
-"Situationship":{ bg:"rgba(251,146,60,0.1)", color:"#fdba74" },
-"Friends to Lovers":{ bg:"rgba(52,211,153,0.1)", color:"#6ee7b7" },
+  "Romantic":       { bg:"rgba(244,114,182,0.1)", color:"#f9a8d4" },
+  "Engaged":        { bg:"rgba(167,139,250,0.1)", color:"#c4b5fd" },
+  "Married":        { bg:"rgba(251,191,36,0.1)",  color:"#fde68a" },
+  "Long Distance":  { bg:"rgba(96,165,250,0.1)",  color:"#93c5fd" },
+  "Situationship":  { bg:"rgba(251,146,60,0.1)",  color:"#fdba74" },
+  "Friends to Lovers":{ bg:"rgba(52,211,153,0.1)", color:"#6ee7b7" },
 };
 const tc = TYPE_COLORS[couple.couple_type] || { bg:"rgba(255,255,255,0.06)", color:"rgba(255,255,255,0.4)" };
 const bondColor = bond >= 80 ? "#34d399" : bond >= 55 ? "#f87171" : "#6b7280";
 const locationLabel = [couple.institution, couple.locality].filter(Boolean).join(" · ");
 const totalRxns = EMOJIS.reduce((s, e) => s + (reactions[e] || 0), 0);
+
 return (
-<div style={{ borderRadius:18, marginBottom:10, overflow:"hidden", background:"rgba(255,255,255,0.04)", border:`1px solid ${rc.border}`, backdropFilter:"blur(12px)" }}>
-{isTop3 && <div style={{ height:2, background:"linear-gradient(90deg,#f87171,#fb923c,#fbbf24)" }} />}
-<div style={{ padding:"16px 16px 14px" }}>
-<div onClick={() => onSelect && onSelect(couple)}
-style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14, cursor:"pointer" }}>
-<StatusRingAvatar couple={couple} size={44} rcBorder={rc.border} hasStatus={hasStatus} />
-<div style={{ flex:1, minWidth:0 }}>
-<div onClick={() => onSelect && onSelect(couple)} style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14, cursor:"pointer" }}>
-{rc.crown && <span style={{ fontSize:14 }}>{rc.crown}</span>}
-<div style={{ fontWeight:700, fontSize:15, color:"#fff", letterSpacing:"-0.02em", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{displayName}</div>
-</div>
-<div style={{ display:"flex", alignItems:"center", gap:6, marginTop:5, flexWrap:"wrap" }}>
-<span style={{ fontSize:11, padding:"2px 9px", borderRadius:999, background:tc.bg, color:tc.color, fontWeight:600 }}>{couple.couple_type||"Unknown"}</span>
-{locationLabel && <span style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>{locationLabel}</span>}
-</div>
-</div>
-<div style={{ textAlign:"right", flexShrink:0 }}>
-<div style={{ fontSize:24, fontWeight:800, letterSpacing:"-0.03em", color:bondColor }}>{bond}</div>
-<div style={{ fontSize:10, color:"rgba(255,255,255,0.25)", fontWeight:500, marginTop:1 }}>bond</div>
-</div>
-</div>
-<div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
-<div style={{ fontSize:11, fontWeight:700, color:rc.accent, padding:"2px 9px", borderRadius:999, background:"rgba(255,255,255,0.04)", border:`1px solid ${rc.border}`, flexShrink:0 }}>#{rank}</div>
-<div style={{ flex:1, height:2.5, borderRadius:999, background:"rgba(255,255,255,0.07)" }}>
-<div style={{ height:"100%", borderRadius:999, width:`${percentile}%`, background:"linear-gradient(90deg,#f87171,#fb923c)", transition:"width 0.6s ease" }} />
-</div>
-<div style={{ fontSize:10, color:"rgba(255,255,255,0.2)", fontWeight:500, flexShrink:0 }}>top {percentile}%</div>
-</div>
-<div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6, marginBottom:14 }}>
-{[{ label:"Sync", val:couple.emotional_sync_score }, { label:"Stable", val:couple.stability_score }, { label:"Growth", val:couple.growth_index }].map(s => (
-<div key={s.label} style={{ borderRadius:10, padding:"9px 6px", textAlign:"center", background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.06)" }}>
-<div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>{Math.round(s.val||0)}</div>
-<div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:2 }}>{s.label}</div>
-</div>
-))}
-</div>
-{/* Social Links row */}
-{couple.social_links && Object.keys(couple.social_links).some(k => couple.social_links[k]) && (
-<div style={{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" }}>
-{[
-{ key:"instagram", label:"Instagram", icon:"📸", color:"rgba(244,114,182,0.8)" },
-{ key:"linkedin",  label:"LinkedIn",  icon:"💼", color:"rgba(96,165,250,0.8)" },
-{ key:"twitter",   label:"Twitter",   icon:"🐦", color:"rgba(96,165,250,0.7)" },
-{ key:"other",     label:"Link",      icon:"🔗", color:"rgba(255,255,255,0.5)" },
-].filter(s => couple.social_links[s.key]).map(s => (
-<a key={s.key}
-  href={couple.social_links[s.key].startsWith("http") 
-    ? couple.social_links[s.key] 
-    : "https://" + couple.social_links[s.key]}
-  target="_blank" rel="noopener noreferrer"
-  onClick={e => e.stopPropagation()}
-  style={{
-    display:"flex", alignItems:"center", gap:4,
-    padding:"4px 10px", borderRadius:999,
-    background:"rgba(255,255,255,0.05)",
-    border:"1px solid rgba(255,255,255,0.09)",
-    textDecoration:"none", fontSize:11,
-    fontWeight:600, color:s.color,
-    cursor:"pointer"
-  }}>
-  <span>{s.icon}</span>
-  <span>{s.label}</span>
-</a>
-))}
-</div>
-)}
-<div style={{ display:"flex", gap:6, marginBottom:12, justifyContent:"space-between" }}>
-{EMOJIS.map(emoji => {
-const count = reactions[emoji] || 0;
-const active = myReaction === emoji;
-return (
-<button key={emoji} onClick={() => onReact(emoji)}
-style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3, padding:"7px 4px", borderRadius:12, background: active ? "rgba(248,113,113,0.15)" : "rgba(255,255,255,0.04)", border: active ? "1px solid rgba(248,113,113,0.3)" : "1px solid rgba(255,255,255,0.07)", cursor:"pointer", transition:"all 0.15s", transform: active ? "scale(1.08)" : "scale(1)" }}>
-<span style={{ fontSize:18, lineHeight:1 }}>{emoji}</span>
-<span style={{ fontSize:10, fontWeight:700, color: active ? "#fca5a5" : "rgba(255,255,255,0.3)" }}>{count > 0 ? count : ""}</span>
-</button>
-);
-})}
-</div>
-<div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-<div style={{ fontSize:11, color:"rgba(255,255,255,0.2)" }}>{totalRxns > 0 && `${totalRxns} reaction${totalRxns !== 1 ? "s" : ""}`}</div>
-<button onClick={() => setShowComments(v => !v)}
-style={{ display:"flex", alignItems:"center", gap:5, padding:"6px 12px", borderRadius:10, background: showComments ? "rgba(248,113,113,0.1)" : "rgba(255,255,255,0.04)", border: showComments ? "1px solid rgba(248,113,113,0.25)" : "1px solid rgba(255,255,255,0.08)", cursor:"pointer", transition:"all 0.15s", fontFamily:"inherit" }}>
-<span style={{ fontSize:13 }}>💬</span>
-<span style={{ fontSize:12, fontWeight:600, color: showComments ? "#fca5a5" : "rgba(255,255,255,0.4)" }}>{commentCount > 0 ? commentCount : "Comment"}</span>
-</button>
-</div>
-</div>
-{showComments && <CommentDrawer targetId={couple.id} targetType="couple" />}
-</div>
+  <div style={{ borderRadius:18, marginBottom:10, overflow:"hidden",
+    background:"rgba(255,255,255,0.04)", border:`1px solid ${rc.border}`,
+    backdropFilter:"blur(12px)" }}>
+    {isTop3 && <div style={{ height:2, background:"linear-gradient(90deg,#f87171,#fb923c,#fbbf24)" }} />}
+    <div style={{ padding:"16px 16px 14px" }}>
+
+      {/* Name + avatar row */}
+      <div onClick={() => onSelect && onSelect(couple)}
+        style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14, cursor:"pointer" }}>
+        <StatusRingAvatar couple={couple} size={44} rcBorder={rc.border} hasStatus={hasStatus} />
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4 }}>
+            {rc.crown && <span style={{ fontSize:14 }}>{rc.crown}</span>}
+            <div style={{ fontWeight:700, fontSize:15, color:"#fff", letterSpacing:"-0.02em",
+              whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{displayName}</div>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+            <span style={{ fontSize:11, padding:"2px 9px", borderRadius:999,
+              background:tc.bg, color:tc.color, fontWeight:600 }}>{couple.couple_type||"Unknown"}</span>
+            {locationLabel && <span style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>{locationLabel}</span>}
+          </div>
+        </div>
+        <div style={{ textAlign:"right", flexShrink:0 }}>
+          <div style={{ fontSize:24, fontWeight:800, letterSpacing:"-0.03em", color:bondColor }}>{bond}</div>
+          <div style={{ fontSize:10, color:"rgba(255,255,255,0.25)", fontWeight:500, marginTop:1 }}>bond</div>
+        </div>
+      </div>
+
+      {/* ── NEW: Backstory teaser ── */}
+      {couple.backstory && (
+        <div onClick={() => onSelect && onSelect(couple)}
+          style={{ fontSize:12, color:"rgba(255,255,255,0.45)", fontStyle:"italic",
+            lineHeight:1.6, marginBottom:12, cursor:"pointer",
+            borderLeft:"2px solid rgba(248,113,113,0.3)", paddingLeft:10 }}>
+          "{couple.backstory.length > 80 ? couple.backstory.slice(0, 80) + "…" : couple.backstory}"
+        </div>
+      )}
+
+      {/* Rank bar */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
+        <div style={{ fontSize:11, fontWeight:700, color:rc.accent, padding:"2px 9px",
+          borderRadius:999, background:"rgba(255,255,255,0.04)", border:`1px solid ${rc.border}`,
+          flexShrink:0 }}>#{rank}</div>
+        <div style={{ flex:1, height:2.5, borderRadius:999, background:"rgba(255,255,255,0.07)" }}>
+          <div style={{ height:"100%", borderRadius:999, width:`${percentile}%`,
+            background:"linear-gradient(90deg,#f87171,#fb923c)", transition:"width 0.6s ease" }} />
+        </div>
+        <div style={{ fontSize:10, color:"rgba(255,255,255,0.2)", fontWeight:500, flexShrink:0 }}>
+          top {percentile}%
+        </div>
+      </div>
+
+      {/* Score grid */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6, marginBottom:14 }}>
+        {[{ label:"Sync",   val:couple.emotional_sync_score },
+          { label:"Stable", val:couple.stability_score },
+          { label:"Growth", val:couple.growth_index }].map(s => (
+          <div key={s.label} style={{ borderRadius:10, padding:"9px 6px", textAlign:"center",
+            background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.06)" }}>
+            <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>{Math.round(s.val||0)}</div>
+            <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:2 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Social links */}
+      {couple.social_links && Object.keys(couple.social_links).some(k => couple.social_links[k]) && (
+        <div style={{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" }}>
+          {[
+            { key:"instagram", label:"Instagram", icon:"📸", color:"rgba(244,114,182,0.8)" },
+            { key:"linkedin",  label:"LinkedIn",  icon:"💼", color:"rgba(96,165,250,0.8)" },
+            { key:"twitter",   label:"Twitter",   icon:"🐦", color:"rgba(96,165,250,0.7)" },
+            { key:"other",     label:"Link",      icon:"🔗", color:"rgba(255,255,255,0.5)" },
+          ].filter(s => couple.social_links[s.key]).map(s => (
+            <a key={s.key}
+              href={couple.social_links[s.key].startsWith("http")
+                ? couple.social_links[s.key]
+                : "https://" + couple.social_links[s.key]}
+              target="_blank" rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              style={{ display:"flex", alignItems:"center", gap:4, padding:"4px 10px",
+                borderRadius:999, background:"rgba(255,255,255,0.05)",
+                border:"1px solid rgba(255,255,255,0.09)",
+                textDecoration:"none", fontSize:11, fontWeight:600,
+                color:s.color, cursor:"pointer" }}>
+              <span>{s.icon}</span><span>{s.label}</span>
+            </a>
+          ))}
+        </div>
+      )}
+
+      {/* Emoji reactions */}
+      <div style={{ display:"flex", gap:6, marginBottom:12, justifyContent:"space-between" }}>
+        {EMOJIS.map(emoji => {
+          const count = reactions[emoji] || 0;
+          const active = myReaction === emoji;
+          return (
+            <button key={emoji} onClick={() => onReact(emoji)}
+              style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
+                gap:3, padding:"7px 4px", borderRadius:12,
+                background: active ? "rgba(248,113,113,0.15)" : "rgba(255,255,255,0.04)",
+                border: active ? "1px solid rgba(248,113,113,0.3)" : "1px solid rgba(255,255,255,0.07)",
+                cursor:"pointer", transition:"all 0.15s",
+                transform: active ? "scale(1.08)" : "scale(1)" }}>
+              <span style={{ fontSize:18, lineHeight:1 }}>{emoji}</span>
+              <span style={{ fontSize:10, fontWeight:700,
+                color: active ? "#fca5a5" : "rgba(255,255,255,0.3)" }}>{count > 0 ? count : ""}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Bottom row: reactions count + spotted badge + comment btn */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8, flex:1 }}>
+          {totalRxns > 0 && (
+            <div style={{ fontSize:11, color:"rgba(255,255,255,0.2)" }}>
+              {totalRxns} reaction{totalRxns !== 1 ? "s" : ""}
+            </div>
+          )}
+          {/* ── NEW: Community spotted badge ── */}
+          {communityPhotoCount > 0 && (
+            <span style={{ fontSize:11, padding:"3px 9px", borderRadius:999,
+              background:"rgba(248,113,113,0.08)", color:"rgba(248,113,113,0.6)",
+              border:"1px solid rgba(248,113,113,0.15)" }}>
+              👀 {communityPhotoCount} spotted
+            </span>
+          )}
+        </div>
+        <button onClick={() => setShowComments(v => !v)}
+          style={{ display:"flex", alignItems:"center", gap:5, padding:"6px 12px",
+            borderRadius:10,
+            background: showComments ? "rgba(248,113,113,0.1)" : "rgba(255,255,255,0.04)",
+            border: showComments ? "1px solid rgba(248,113,113,0.25)" : "1px solid rgba(255,255,255,0.08)",
+            cursor:"pointer", transition:"all 0.15s", fontFamily:"inherit" }}>
+          <span style={{ fontSize:13 }}>💬</span>
+          <span style={{ fontSize:12, fontWeight:600,
+            color: showComments ? "#fca5a5" : "rgba(255,255,255,0.4)" }}>
+            {commentCount > 0 ? commentCount : "Comment"}
+          </span>
+        </button>
+      </div>
+
+      {/* ── NEW: Tap to explore hint ── */}
+      <div onClick={() => onSelect && onSelect(couple)}
+        style={{ textAlign:"center", padding:"8px 0 2px",
+          fontSize:10, color:"rgba(255,255,255,0.12)",
+          letterSpacing:"0.06em", cursor:"pointer",
+          borderTop:"1px solid rgba(255,255,255,0.04)", marginTop:8 }}>
+        TAP TO EXPLORE →
+      </div>
+
+    </div>
+    {showComments && <CommentDrawer targetId={couple.id} targetType="couple" />}
+  </div>
 );
 }
+
 /* ============================================================
 4. PASTE after CoupleCard → function CreateCoupleProfile()
 ============================================================ */
@@ -9230,135 +10033,182 @@ sendFromUI();
 
 return coachContainer;
 }
-
 /* ---------------- MESSAGE RENDER ---------------- */
 
 function appendCoachMessage(role, text) {
-if (!coachMessagesEl) return;
-
-const wrapper = document.createElement("div");
-wrapper.className =
-"coach-msg " +
-(role === "user" ? "coach-msg-user" : "coach-msg-bot");
-
-wrapper.innerText = text;
-coachMessagesEl.appendChild(wrapper);
-coachMessagesEl.scrollTop = coachMessagesEl.scrollHeight;
+  if (!coachMessagesEl) return;
+  const wrapper = document.createElement("div");
+  wrapper.className =
+    "coach-msg " + (role === "user" ? "coach-msg-user" : "coach-msg-bot");
+  wrapper.innerText = text;
+  coachMessagesEl.appendChild(wrapper);
+  coachMessagesEl.scrollTop = coachMessagesEl.scrollHeight;
 }
+
+// ⚡ NEW — updates the LAST bot message in place (for streaming)
+function updateLastBotMessage(text) {
+  if (!coachMessagesEl) return;
+  const msgs = coachMessagesEl.querySelectorAll(".coach-msg-bot");
+  const last = msgs[msgs.length - 1];
+  if (last) {
+    last.innerText = text;
+    coachMessagesEl.scrollTop = coachMessagesEl.scrollHeight;
+  }
+}
+
 async function sendFromUI() {
-if (!coachInputEl) return;
+  if (!coachInputEl) return;
 
-const raw = coachInputEl.value;
-const question = (raw || "").trim();
-if (!question) return;
+  const raw = coachInputEl.value;
+  const question = (raw || "").trim();
+  if (!question) return;
 
-coachInputEl.value = "";
-appendCoachMessage("user", question);
+  coachInputEl.value = "";
+  appendCoachMessage("user", question);
 
-const bondId =
-(localStorage.getItem("bond_username") || "")
-.trim()
-.toLowerCase() || "anon";
+  const bondId =
+    (localStorage.getItem("bond_username") || "").trim().toLowerCase() || "anon";
 
-const state = window.__BOND_STATE__ || {};
+  const state = window.__BOND_STATE__ || {};
 
-// ✅ SHOW THINKING IMMEDIATELY
-showCoachThinking();
+  // ✅ SHOW THINKING IMMEDIATELY
+  showCoachThinking();
 
-try {
-const answer = await coach.ask({
-question,
-bondId,
-context: state,
-});
-
-removeCoachThinking();
-appendCoachMessage("bot", answer || "(no reply from server)");
-} catch (err) {
-console.error("[BondCoach] sendFromUI error", err);
-removeCoachThinking();
-appendCoachMessage(
-"bot",
-"Something went wrong talking to Bond Coach. Try again in a bit."
-);
-}
+  try {
+    await coach.ask({
+      question,
+      bondId,
+      context: state,
+    });
+    // ⚡ streaming handles its own UI — nothing to do here
+  } catch (err) {
+    console.error("[BondCoach] sendFromUI error", err);
+    removeCoachThinking();
+    appendCoachMessage(
+      "bot",
+      "Something went wrong talking to Bond Coach. Try again in a bit."
+    );
+  }
 }
 async function coachAsk(input) {
-// 🔑 DEFINE KEY INSIDE FUNCTION (INLINE BABEL SAFE)
+  const COACH_ENDPOINT =
+    "https://nkujeixtehrkhqelqbpm.supabase.co/functions/v1/bond-coach";
 
-const COACH_ENDPOINT =
-"https://nkujeixtehrkhqelqbpm.supabase.co/functions/v1/bond-coach";
+  let userMessage = "";
+  let mode = "bond_coach";
+  let partnerTraits = "";
 
+  if (typeof input === "string") {
+    userMessage = input;
+  } else if (input && typeof input === "object") {
+    userMessage = input.question || input.userMessage || "";
+    mode = input.mode || "bond_coach";
+    partnerTraits = input.partnerTraits || "";
+  }
 
-let userMessage = "";
-let mode = "bond_coach";
-let partnerTraits = "";
+  if (!userMessage.trim()) {
+    return "Please say something first.";
+  }
 
-if (typeof input === "string") {
-userMessage = input;
-} else if (input && typeof input === "object") {
-userMessage = input.question || input.userMessage || "";
-mode = input.mode || "bond_coach";
-partnerTraits = input.partnerTraits || "";
+  console.log("[BondCoach] ask()", { preview: userMessage.slice(0, 80), mode });
+
+  try {
+    const res = await fetch(COACH_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
+        mode,
+        userMessage,
+        partnerTraits,
+        stream: true,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("[BondCoach] server error", res.status, text);
+      removeCoachThinking();
+      appendCoachMessage(
+        "bot",
+        res.status === 429
+          ? "Coach is busy right now 🧠 — try again in a moment."
+          : `Something went wrong (${res.status}). Try again.`
+      );
+      return;
+    }
+
+    // ✅ Handle plain JSON (greeting fast-path from edge function)
+    const contentType = res.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const data = await res.json();
+      removeCoachThinking();
+      appendCoachMessage("bot", data.text || "(no response)");
+      return;
+    }
+
+    // ⚡ STREAMING — words appear as they generate
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let answer = "";
+    let botMsgCreated = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const lines = decoder
+        .decode(value, { stream: true })
+        .split("\n")
+        .filter((l) => l.startsWith("data: "));
+
+      for (const line of lines) {
+        const raw = line.slice(6).trim();
+        if (!raw || raw === "[DONE]") continue;
+
+        try {
+          const { token } = JSON.parse(raw);
+          if (!token) continue;
+
+          answer += token;
+
+          if (!botMsgCreated) {
+            removeCoachThinking();
+            appendCoachMessage("bot", answer);
+            botMsgCreated = true;
+          } else {
+            updateLastBotMessage(answer);
+          }
+        } catch {
+          // skip malformed chunks
+        }
+      }
+    }
+
+    // Safety fallback if nothing came through
+    if (!answer) {
+      removeCoachThinking();
+      appendCoachMessage("bot", "(no response)");
+    }
+
+  } catch (err) {
+    console.error("[BondCoach] ask() crashed", err);
+    removeCoachThinking();
+    appendCoachMessage("bot", "Connection error. Please try again.");
+  }
 }
-
-if (!userMessage.trim()) {
-return "Please say something first.";
-}
-
-console.log("[BondCoach] ask()", {
-preview: userMessage.slice(0, 80),
-mode,
-});
-
-try {
-const res = await fetch(COACH_ENDPOINT, {
-method: "POST",
-headers: {
-  "Content-Type": "application/json",
-  "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-},
-body: JSON.stringify({
-  mode,
-  userMessage,
-  partnerTraits,
-}),
-});
-
-if (!res.ok) {
-const text = await res.text();
-console.error("[BondCoach] server error", res.status, text);
-return `Server error (${res.status})`;
-}
-
-const raw = await res.text();
-
-if (raw.trim().startsWith("<")) {
-console.error("HTML RESPONSE RECEIVED:", raw.slice(0, 200));
-return "Server routing error.";
-}
-
-const data = JSON.parse(raw);
-return data.text || "(no response)";
-
-} catch (err) {
-console.error("[BondCoach] ask() crashed", err);
-return "Connection error. Please try again.";
-}
-}
-
 
 function toggleBondCoach() {
   console.log("[BondCoach] toggleBondCoach called");
   ensureCoachUI();
   coachIsOpen = !coachIsOpen;
   if (coachContainer) {
-    coachContainer.style.display = coachIsOpen ? "block" : 
-"none";
+    coachContainer.style.display = coachIsOpen ? "block" : "none";
   }
   if (coachIsOpen && coachInputEl) {
-    setTimeout(() => coachInputEl && coachInputEl.focus(), 
-30);
+    setTimeout(() => coachInputEl && coachInputEl.focus(), 30);
   }
 }
 
@@ -9379,8 +10229,6 @@ window.openCoachFromReact = function (initialPrompt) {
     console.error("[BondCoach] openCoachFromReact error", e);
   }
 };
-
-
 // ── END OF PASTED CODE ──
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

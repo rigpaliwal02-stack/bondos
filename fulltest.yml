@@ -1,0 +1,141 @@
+config:
+  target: "https://nkujeixtehrkhqelqbpm.supabase.co"
+  phases:
+    - duration: 60
+      arrivalRate: 10
+      rampTo: 100
+      name: "Ramp to 100 users"
+    - duration: 60
+      arrivalRate: 100
+      name: "Hold at 100 users"
+  defaults:
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdWplaXh0ZWhya2hxZWxxYnBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1NTgxNjcsImV4cCI6MjA4MDEzNDE2N30.H0soEVjKS8aduXspJqPoQ-LiOX-oLa9Z9aMCpybcqng"
+      apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdWplaXh0ZWhya2hxZWxxYnBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1NTgxNjcsImV4cCI6MjA4MDEzNDE2N30.H0soEVjKS8aduXspJqPoQ-LiOX-oLa9Z9aMCpybcqng"
+  http:
+    timeout: 10
+
+scenarios:
+  - name: "Load my profile"
+    weight: 8
+    flow:
+      - get:
+          url: "/rest/v1/profiles?select=*&limit=1"
+  - name: "Load profiles list"
+    weight: 6
+    flow:
+      - get:
+          url: "/rest/v1/profiles?select=id,username,avatar_url,rank_score&limit=20"
+  - name: "Search users - letter a"
+    weight: 5
+    flow:
+      - get:
+          url: "/rest/v1/profiles?select=id,username,avatar_url&username=ilike.*a*&limit=10"
+  - name: "Search users - letter e"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/profiles?select=id,username,avatar_url&username=ilike.*e*&limit=10"
+  - name: "Couples discover feed"
+    weight: 10
+    flow:
+      - get:
+          url: "/rest/v1/couples?select=*&order=bond_score.desc&limit=20"
+  - name: "Single couple profile"
+    weight: 6
+    flow:
+      - get:
+          url: "/rest/v1/couples?select=*&limit=1"
+  - name: "Couple statuses"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/couple_statuses?select=*&limit=20"
+  - name: "Couple community photos"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/couple_community_photos?select=*&limit=20"
+  - name: "Posts feed"
+    weight: 10
+    flow:
+      - get:
+          url: "/rest/v1/posts?select=*&order=created_at.desc&limit=20"
+  - name: "Reactions on posts"
+    weight: 5
+    flow:
+      - get:
+          url: "/rest/v1/reactions?select=target_id,reaction_type&target_type=eq.post&limit=50"
+  - name: "Reactions on couples"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/reactions?select=id,reaction_type&target_type=eq.couple&limit=50"
+  - name: "Couple comments"
+    weight: 5
+    flow:
+      - get:
+          url: "/rest/v1/couple_comments?select=*&limit=20"
+  - name: "Ship It feed"
+    weight: 8
+    flow:
+      - get:
+          url: "/rest/v1/ship_it?select=*&order=created_at.desc&limit=50"
+  - name: "Ship votes"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/ship_votes?select=ship_id,vote&limit=50"
+  - name: "Check follows"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/follows?select=*&limit=20"
+  - name: "Achievements"
+    weight: 3
+    flow:
+      - get:
+          url: "/rest/v1/achievements?select=*&limit=20"
+  - name: "Couple challenges"
+    weight: 3
+    flow:
+      - get:
+          url: "/rest/v1/couple_challenges?select=*&limit=20"
+  - name: "Couple streaks"
+    weight: 3
+    flow:
+      - get:
+          url: "/rest/v1/couple_streaks?select=*&limit=20"
+  - name: "Add reaction to post"
+    weight: 4
+    flow:
+      - post:
+          url: "/rest/v1/reactions"
+          headers:
+            Prefer: "return=minimal"
+          json:
+            target_type: "post"
+            target_id: "00000000-0000-0000-0000-000000000001"
+            reaction_type: "heart"
+  - name: "Post a comment"
+    weight: 3
+    flow:
+      - post:
+          url: "/rest/v1/couple_comments"
+          headers:
+            Prefer: "return=minimal"
+          json:
+            content: "This couple is goals 🔥"
+            target_type: "couple"
+            username: "testuser"
+  - name: "Cast ship vote"
+    weight: 3
+    flow:
+      - post:
+          url: "/rest/v1/ship_votes"
+          headers:
+            Prefer: "return=minimal"
+          json:
+            ship_id: "00000000-0000-0000-0000-000000000001"
+            vote: "sail"

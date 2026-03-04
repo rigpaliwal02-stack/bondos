@@ -1,0 +1,106 @@
+config:
+  target: "https://nkujeixtehrkhqelqbpm.supabase.co"
+  phases:
+    - duration: 60
+      arrivalRate: 20
+      rampTo: 500
+      name: "Ramp to 500 Harvard users"
+    - duration: 60
+      arrivalRate: 500
+      name: "Hold at 500 Harvard users"
+  defaults:
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdWplaXh0ZWhya2hxZWxxYnBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1NTgxNjcsImV4cCI6MjA4MDEzNDE2N30.H0soEVjKS8aduXspJqPoQ-LiOX-oLa9Z9aMCpybcqng"
+      apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdWplaXh0ZWhya2hxZWxxYnBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1NTgxNjcsImV4cCI6MjA4MDEzNDE2N30.H0soEVjKS8aduXspJqPoQ-LiOX-oLa9Z9aMCpybcqng"
+  http:
+    timeout: 15
+
+scenarios:
+  - name: "Couples discover feed"
+    weight: 12
+    flow:
+      - get:
+          url: "/rest/v1/couples?select=*&order=bond_score.desc&limit=20"
+  - name: "Posts feed"
+    weight: 12
+    flow:
+      - get:
+          url: "/rest/v1/posts?select=*&order=created_at.desc&limit=20"
+  - name: "Load my profile"
+    weight: 10
+    flow:
+      - get:
+          url: "/rest/v1/profiles?select=*&limit=1"
+  - name: "Ship It feed"
+    weight: 10
+    flow:
+      - get:
+          url: "/rest/v1/ship_it?select=*&order=created_at.desc&limit=50"
+  - name: "Search users"
+    weight: 8
+    flow:
+      - get:
+          url: "/rest/v1/profiles?select=id,username,avatar_url&username=ilike.*a*&limit=10"
+  - name: "Single couple profile"
+    weight: 7
+    flow:
+      - get:
+          url: "/rest/v1/couples?select=*&limit=1"
+  - name: "Reactions on posts"
+    weight: 6
+    flow:
+      - get:
+          url: "/rest/v1/reactions?select=target_id,reaction_type&target_type=eq.post&limit=50"
+  - name: "Couple comments"
+    weight: 6
+    flow:
+      - get:
+          url: "/rest/v1/couple_comments?select=*&limit=20"
+  - name: "Ship votes"
+    weight: 5
+    flow:
+      - get:
+          url: "/rest/v1/ship_votes?select=ship_id,vote&limit=50"
+  - name: "Couple statuses"
+    weight: 5
+    flow:
+      - get:
+          url: "/rest/v1/couple_statuses?select=*&limit=20"
+  - name: "Couple community photos"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/couple_community_photos?select=*&limit=20"
+  - name: "Add reaction"
+    weight: 5
+    flow:
+      - post:
+          url: "/rest/v1/reactions"
+          headers:
+            Prefer: "return=minimal"
+          json:
+            target_type: "post"
+            target_id: "00000000-0000-0000-0000-000000000001"
+            reaction_type: "heart"
+  - name: "Post comment"
+    weight: 5
+    flow:
+      - post:
+          url: "/rest/v1/couple_comments"
+          headers:
+            Prefer: "return=minimal"
+          json:
+            content: "goals 🔥"
+            target_type: "couple"
+            username: "harvarduser"
+  - name: "Cast ship vote"
+    weight: 5
+    flow:
+      - post:
+          url: "/rest/v1/ship_votes"
+          headers:
+            Prefer: "return=minimal"
+          json:
+            ship_id: "00000000-0000-0000-0000-000000000001"
+            vote: "sail"

@@ -1,0 +1,40 @@
+config:
+  target: "https://nkujeixtehrkhqelqbpm.supabase.co"
+  phases:
+    - duration: 60
+      arrivalRate: 10
+      rampTo: 100
+      name: "Ramp up to 100 users"
+  defaults:
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdWplaXh0ZWhya2hxZWxxYnBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1NTgxNjcsImV4cCI6MjA4MDEzNDE2N30.H0soEVjKS8aduXspJqPoQ-LiOX-oLa9Z9aMCpybcqng"
+
+scenarios:
+  - name: "Bond Coach"
+    flow:
+      - post:
+          url: "/functions/v1/bond-coach"
+          json:
+            mode: "bond_coach"
+            userMessage: "How do I improve my relationship?"
+
+  - name: "Load profiles"
+    flow:
+      - get:
+          url: "/rest/v1/profiles?select=*&limit=10"
+
+  - name: "Load couples feed"
+    flow:
+      - get:
+          url: "/rest/v1/couples?select=*&order=bond_score.desc&limit=20"
+
+  - name: "Load posts"
+    flow:
+      - get:
+          url: "/rest/v1/posts?select=*&order=created_at.desc&limit=20"
+
+  - name: "Ship it feed"
+    flow:
+      - get:
+          url: "/rest/v1/ship_it?select=*&order=created_at.desc&limit=50"

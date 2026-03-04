@@ -27,6 +27,1255 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+    const FLAG_QUESTIONS = [
+  
+{ id:"flag_r_001", text:"This person tries to limit who others can meet or spend time with.", flag:"red", dimension:"control", level:4 },
+{ id:"flag_r_002", text:"This person pressures others to change their behaviour just to keep peace.", flag:"red", dimension:"control", level:3 },
+{ id:"flag_r_003", text:"This person reacts with anger when others make independent choices.", flag:"red", dimension:"power", level:4 },
+{ id:"flag_r_004", text:"This person uses fear, threats, or intimidation to influence decisions.", flag:"red", dimension:"power", level:5 },
+{ id:"flag_r_005", text:"This person expects loyalty and sacrifice without offering the same in return.", flag:"red", dimension:"power", level:4 },
+
+{ id:"flag_r_006", text:"This person punishes disagreement by withdrawing affection or communication.", flag:"red", dimension:"control", level:4 },
+{ id:"flag_r_007", text:"This person expects to be prioritised over others at all times.", flag:"red", dimension:"control", level:3 },
+{ id:"flag_r_008", text:"This person reacts negatively when boundaries are clearly stated.", flag:"red", dimension:"boundaries", level:4 },
+{ id:"flag_r_009", text:"This person disguises control as care, concern, or protection.", flag:"red", dimension:"manipulation", level:4 },
+{ id:"flag_r_010", text:"This person becomes hostile or aggressive when not obeyed.", flag:"red", dimension:"power", level:5 },
+
+{ id:"flag_r_011", text:"This person makes others feel guilty for wanting autonomy.", flag:"red", dimension:"control", level:3 },
+{ id:"flag_r_012", text:"This person treats disagreement as betrayal.", flag:"red", dimension:"power", level:4 },
+{ id:"flag_r_013", text:"This person pressures others to constantly reassure them.", flag:"red", dimension:"control", level:3 },
+{ id:"flag_r_014", text:"This person reacts badly when they are not the centre of attention.", flag:"red", dimension:"control", level:3 },
+{ id:"flag_r_015", text:"This person frames independence as selfishness.", flag:"red", dimension:"manipulation", level:4 },
+
+{ id:"flag_r_016", text:"This person has physically intimidated someone during conflict.", flag:"red", dimension:"safety", level:5 },
+{ id:"flag_r_017", text:"This person has threatened harm when angry.", flag:"red", dimension:"safety", level:5 },
+{ id:"flag_r_018", text:"This person breaks or throws objects during arguments.", flag:"red", dimension:"safety", level:5 },
+{ id:"flag_r_019", text:"This person escalates disagreements into shouting or aggressive behaviour.", flag:"red", dimension:"conflict", level:4 },
+{ id:"flag_r_020", text:"This person makes others feel unsafe expressing disagreement.", flag:"red", dimension:"safety", level:5 },
+
+{ id:"flag_r_021", text:"This person ignores verbal or physical signals of discomfort.", flag:"red", dimension:"safety", level:5 },
+{ id:"flag_r_022", text:"This person jokes about violence or harm toward others.", flag:"red", dimension:"safety", level:4 },
+{ id:"flag_r_023", text:"This person normalises aggressive or threatening behaviour.", flag:"red", dimension:"safety", level:4 },
+{ id:"flag_r_024", text:"This person threatens consequences to force compliance.", flag:"red", dimension:"power", level:5 },
+{ id:"flag_r_025", text:"This person has a history of explosive emotional outbursts.", flag:"red", dimension:"safety", level:4 },
+
+{ id:"flag_r_026", text:"This person makes others feel physically or emotionally unsafe when angry.", flag:"red", dimension:"safety", level:5 },
+{ id:"flag_r_027", text:"This person dismisses fear or discomfort expressed by others.", flag:"red", dimension:"safety", level:4 },
+{ id:"flag_r_028", text:"This person becomes unpredictable during conflict.", flag:"red", dimension:"safety", level:4 },
+{ id:"flag_r_029", text:"This person uses anger to end discussions.", flag:"red", dimension:"power", level:4 },
+{ id:"flag_r_030", text:"This person’s reactions make others afraid to of speaking honestly.", flag:"red", dimension:"safety", level:5 },
+
+{ id:"flag_r_031", text:"This person repeatedly lies about matters that affect others.", flag:"red", dimension:"trust", level:4 },
+{ id:"flag_r_032", text:"This person hides important information intentionally.", flag:"red", dimension:"trust", level:4 },
+{ id:"flag_r_033", text:"This person changes their story when confronted with facts.", flag:"red", dimension:"trust", level:4 },
+{ id:"flag_r_034", text:"This person denies things they clearly said or agreed to.", flag:"red", dimension:"trust", level:4 },
+{ id:"flag_r_035", text:"This person makes others doubt their own memory or perception.", flag:"red", dimension:"manipulation", level:5 },
+
+{ id:"flag_r_036", text:"This person blames others for their own dishonesty.", flag:"red", dimension:"accountability", level:4 },
+{ id:"flag_r_037", text:"This person withholds truth to maintain control or advantage.", flag:"red", dimension:"trust", level:4 },
+{ id:"flag_r_038", text:"This person breaks trust and minimises its impact.", flag:"red", dimension:"trust", level:4 },
+{ id:"flag_r_039", text:"This person avoids accountability after being caught lying.", flag:"red", dimension:"accountability", level:4 },
+{ id:"flag_r_040", text:"This person justifies lying as necessary or unavoidable.", flag:"red", dimension:"trust", level:4 },
+
+{ id:"flag_r_041", text:"This person rewrites past events to avoid responsibility.", flag:"red", dimension:"trust", level:4 },
+{ id:"flag_r_042", text:"This person uses confusion to escape accountability.", flag:"red", dimension:"manipulation", level:4 },
+{ id:"flag_r_043", text:"This person dismisses broken trust as overreaction.", flag:"red", dimension:"trust", level:4 },
+{ id:"flag_r_044", text:"This person avoids clear answers when honesty is required.", flag:"red", dimension:"trust", level:3 },
+{ id:"flag_r_045", text:"This person treats honesty as optional.", flag:"red", dimension:"values", level:4 },
+
+{ id:"flag_r_046", text:"This person reacts defensively when asked for transparency.", flag:"red", dimension:"trust", level:3 },
+{ id:"flag_r_047", text:"This person hides behaviour they know would cause concern.", flag:"red", dimension:"trust", level:4 },
+{ id:"flag_r_048", text:"This person denies responsibility even with evidence.", flag:"red", dimension:"accountability", level:4 },
+{ id:"flag_r_049", text:"This person avoids repair after deception.", flag:"red", dimension:"accountability", level:4 },
+{ id:"flag_r_050", text:"This person repeatedly breaks trust without change.", flag:"red", dimension:"trust", level:5 },
+
+// PINK FLAGS (COMMUNICATION / EMPATHY)
+
+{ id:"flag_p_051", text:"This person avoids difficult conversations.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_052", text:"This person becomes defensive when given feedback.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_053", text:"This person shuts down instead of engaging during disagreement.", flag:"pink", dimension:"communication", level:3 },
+{ id:"flag_p_054", text:"This person dismisses concerns as overreactions.", flag:"pink", dimension:"empathy", level:3 },
+{ id:"flag_p_055", text:"This person struggles to listen without interrupting.", flag:"pink", dimension:"communication", level:2 },
+
+{ id:"flag_p_056", text:"This person avoids follow-up after unresolved conflict.", flag:"pink", dimension:"communication", level:3 },
+{ id:"flag_p_057", text:"This person deflects serious discussions with humour or distraction.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_058", text:"This person changes topics to avoid accountability.", flag:"pink", dimension:"communication", level:3 },
+{ id:"flag_p_059", text:"This person minimises the impact of their words.", flag:"pink", dimension:"empathy", level:3 },
+{ id:"flag_p_060", text:"This person struggles with emotional openness.", flag:"pink", dimension:"communication", level:2 },
+
+{ id:"flag_p_061", text:"This person avoids responsibility when conversations get uncomfortable.", flag:"pink", dimension:"accountability", level:3 },
+{ id:"flag_p_062", text:"This person needs repeated prompting to address issues.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_063", text:"This person becomes passive instead of direct.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_064", text:"This person struggles to acknowledge emotional impact.", flag:"pink", dimension:"empathy", level:3 },
+{ id:"flag_p_065", text:"This person delays important conversations.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_066", text:"This person avoids conversations once emotions rise.", flag:"pink", dimension:"communication", level:3 },
+{ id:"flag_p_067", text:"This person becomes vague instead of addressing issues directly.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_068", text:"This person acknowledges issues but rarely changes behaviour.", flag:"pink", dimension:"accountability", level:3 },
+{ id:"flag_p_069", text:"This person delays resolution hoping problems fade on their own.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_070", text:"This person struggles to validate feelings they don’t agree with.", flag:"pink", dimension:"empathy", level:3 },
+
+{ id:"flag_p_071", text:"This person avoids emotional depth in conversations.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_072", text:"This person becomes quiet instead of expressing disagreement.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_073", text:"This person prefers peacekeeping over honesty.", flag:"pink", dimension:"values", level:3 },
+{ id:"flag_p_074", text:"This person listens but doesn’t always absorb feedback.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_075", text:"This person finds emotional conversations draining and avoids them.", flag:"pink", dimension:"communication", level:2 },
+
+{ id:"flag_p_076", text:"This person becomes defensive when emotions are named.", flag:"pink", dimension:"communication", level:3 },
+{ id:"flag_p_077", text:"This person avoids checking in after tension.", flag:"pink", dimension:"communication", level:3 },
+{ id:"flag_p_078", text:"This person struggles to apologise without justification.", flag:"pink", dimension:"accountability", level:3 },
+{ id:"flag_p_079", text:"This person minimises issues that matter to others.", flag:"pink", dimension:"empathy", level:3 },
+{ id:"flag_p_080", text:"This person delays emotional responsibility.", flag:"pink", dimension:"accountability", level:3 },
+
+{ id:"flag_p_081", text:"This person avoids emotional repair conversations.", flag:"pink", dimension:"communication", level:3 },
+{ id:"flag_p_082", text:"This person becomes passive-aggressive instead of direct.", flag:"pink", dimension:"communication", level:3 },
+{ id:"flag_p_083", text:"This person struggles to stay present during serious discussions.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_084", text:"This person needs repeated reminders to follow through emotionally.", flag:"pink", dimension:"reliability", level:2 },
+{ id:"flag_p_085", text:"This person treats emotional work as optional.", flag:"pink", dimension:"values", level:3 },
+
+{ id:"flag_p_086", text:"This person avoids emotional accountability under stress.", flag:"pink", dimension:"accountability", level:3 },
+{ id:"flag_p_087", text:"This person becomes disengaged when conversations feel uncomfortable.", flag:"pink", dimension:"communication", level:3 },
+{ id:"flag_p_088", text:"This person struggles to balance listening and defending themselves.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_089", text:"This person postpones emotional clarity.", flag:"pink", dimension:"communication", level:2 },
+{ id:"flag_p_090", text:"This person relies on time instead of communication to heal issues.", flag:"pink", dimension:"communication", level:3 },
+{ id:"flag_b_091", text:"This person prefers a slower pace of emotional connection.", flag:"beige", dimension:"preferences", level:1 },
+{ id:"flag_b_092", text:"This person values solitude more than frequent interaction.", flag:"beige", dimension:"social", level:1 },
+{ id:"flag_b_093", text:"This person needs more personal space than others.", flag:"beige", dimension:"boundaries", level:1 },
+{ id:"flag_b_094", text:"This person processes emotions internally before speaking.", flag:"beige", dimension:"style", level:1 },
+{ id:"flag_b_095", text:"This person prefers routine and predictability.", flag:"beige", dimension:"habits", level:1 },
+
+{ id:"flag_b_096", text:"This person is reserved in expressing affection.", flag:"beige", dimension:"style", level:1 },
+{ id:"flag_b_097", text:"This person values independence highly.", flag:"beige", dimension:"values", level:1 },
+{ id:"flag_b_098", text:"This person prefers limited social interaction.", flag:"beige", dimension:"social", level:1 },
+{ id:"flag_b_099", text:"This person has strong personal routines.", flag:"beige", dimension:"habits", level:1 },
+{ id:"flag_b_100", text:"This person communicates very directly.", flag:"beige", dimension:"style", level:1 },
+
+{ id:"flag_b_101", text:"This person needs time alone to recharge emotionally.", flag:"beige", dimension:"energy", level:1 },
+{ id:"flag_b_102", text:"This person dislikes frequent emotional check-ins.", flag:"beige", dimension:"preferences", level:1 },
+{ id:"flag_b_103", text:"This person prefers practical conversations over emotional ones.", flag:"beige", dimension:"communication", level:1 },
+{ id:"flag_b_104", text:"This person values predictability in relationships.", flag:"beige", dimension:"preferences", level:1 },
+{ id:"flag_b_105", text:"This person is cautious before opening up emotionally.", flag:"beige", dimension:"style", level:1 },
+{ id:"flag_g_106", text:"This person listens without interrupting.", flag:"green", dimension:"communication", level:2 },
+{ id:"flag_g_107", text:"This person takes responsibility for emotional impact.", flag:"green", dimension:"accountability", level:3 },
+{ id:"flag_g_108", text:"This person respects boundaries without resistance.", flag:"green", dimension:"respect", level:3 },
+{ id:"flag_g_109", text:"This person remains calm during disagreement.", flag:"green", dimension:"conflict", level:3 },
+{ id:"flag_g_110", text:"This person follows through on commitments.", flag:"green", dimension:"reliability", level:3 },
+
+{ id:"flag_g_111", text:"This person communicates expectations clearly.", flag:"green", dimension:"communication", level:2 },
+{ id:"flag_g_112", text:"This person encourages independence.", flag:"green", dimension:"respect", level:3 },
+{ id:"flag_g_113", text:"This person addresses issues directly.", flag:"green", dimension:"communication", level:3 },
+{ id:"flag_g_114", text:"This person repairs after conflict.", flag:"green", dimension:"conflict", level:3 },
+{ id:"flag_g_115", text:"This person shows empathy under stress.", flag:"green", dimension:"empathy", level:3 },
+
+{ id:"flag_g_116", text:"This person values mutual respect.", flag:"green", dimension:"values", level:3 },
+{ id:"flag_g_117", text:"This person stays consistent in behaviour.", flag:"green", dimension:"reliability", level:3 },
+{ id:"flag_g_118", text:"This person invites honest feedback.", flag:"green", dimension:"communication", level:2 },
+{ id:"flag_g_119", text:"This person acknowledges mistakes without defensiveness.", flag:"green", dimension:"accountability", level:3 },
+{ id:"flag_g_120", text:"This person makes others feel emotionally safe.", flag:"green", dimension:"safety", level:3 },
+];
+</script>
+<script>
+  const FLAG_LEVELS = {
+  level1: { maxLevel: 1, count: 10 },
+  level2: { maxLevel: 2, count: 15 },
+  level3: { maxLevel: 3, count: 20 },
+  level4: { maxLevel: 4, count: 25 },
+};
+</script>
+<script>
+
+const SOLO_QUESTIONS = [
+
+{ id:"sh_emload_001", text:"Thinking about this connection often feels mentally heavy.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_002", text:"I feel emotionally tired after interactions.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_003", text:"My mind keeps replaying conversations.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_004", text:"This connection occupies more mental space than I’d like.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_005", text:"I feel emotionally drained more than nourished.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_006", text:"I carry unresolved feelings about this connection.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_007", text:"I feel weighed down by uncertainty.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_008", text:"Emotional processing around this feels exhausting.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_009", text:"I feel lighter when I’m not thinking about this bond.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_010", text:"This connection adds emotional noise.", dimension:"emotional_load", level:3 },
+
+{ id:"sh_emload_011", text:"I feel mentally cluttered because of this relationship.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_012", text:"Emotional effort feels constant.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_013", text:"I struggle to fully relax emotionally.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_014", text:"I feel preoccupied with what things mean.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_015", text:"This bond feels emotionally consuming.", dimension:"emotional_load", level:4 },
+
+{ id:"sh_emload_016", text:"My thoughts loop around unresolved moments.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_017", text:"I feel emotionally taxed.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_018", text:"This connection feels mentally demanding.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_019", text:"I carry emotional residue after interactions.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_020", text:"I feel emotionally stretched thin.", dimension:"emotional_load", level:4 },
+
+{ id:"sh_emload_021", text:"I don’t feel emotionally refreshed after engaging.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_022", text:"Emotional clarity feels hard to reach.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_023", text:"I feel burdened by unspoken things.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_024", text:"My emotional energy feels depleted.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_025", text:"This bond feels heavy on my mind.", dimension:"emotional_load", level:3 },
+
+{ id:"sh_emload_026", text:"Emotional load feels disproportionate.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_027", text:"I feel mentally restless because of this connection.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_028", text:"I carry tension related to this bond.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_029", text:"Emotional processing feels endless.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_030", text:"I feel mentally fatigued.", dimension:"emotional_load", level:3 },
+
+{ id:"sh_emload_031", text:"This connection drains my emotional bandwidth.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_032", text:"Emotional effort feels unbalanced.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_033", text:"I feel emotionally weighed down.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_034", text:"My emotional energy feels scattered.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_035", text:"This bond doesn’t feel emotionally light.", dimension:"emotional_load", level:3 },
+
+{ id:"sh_emload_036", text:"I feel mentally overwhelmed.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_037", text:"Emotional processing feels tiring.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_038", text:"I feel drained thinking about this.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_039", text:"This connection feels emotionally costly.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_040", text:"Emotional load feels persistent.", dimension:"emotional_load", level:4 },
+
+{ id:"sh_emload_041", text:"I feel mentally exhausted.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_042", text:"Emotional heaviness feels present.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_043", text:"I don’t feel emotionally spacious.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_044", text:"This bond demands emotional attention.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_045", text:"Emotional fatigue feels familiar.", dimension:"emotional_load", level:3 },
+
+{ id:"sh_emload_046", text:"I feel mentally tense.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_047", text:"Emotional effort feels ongoing.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_048", text:"I feel emotionally overloaded.", dimension:"emotional_load", level:4 },
+{ id:"sh_emload_049", text:"This connection feels mentally taxing.", dimension:"emotional_load", level:3 },
+{ id:"sh_emload_050", text:"Emotional weight feels hard to shake.", dimension:"emotional_load", level:4 },
+
+/* =====================================================
+   2️⃣ CLARITY VS CONFUSION (51–100)
+===================================================== */
+
+{ id:"sh_clarity_051", text:"I feel clear about where I stand emotionally.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_052", text:"I don’t feel confused after interactions.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_053", text:"This connection feels emotionally understandable.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_054", text:"I know what this bond means to me.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_055", text:"I don’t second-guess everything.", dimension:"clarity", level:3 },
+
+{ id:"sh_clarity_056", text:"Emotional signals feel consistent.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_057", text:"I don’t feel lost about what’s happening.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_058", text:"My feelings feel organized.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_059", text:"I understand my role in this connection.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_060", text:"Emotional direction feels clear.", dimension:"clarity", level:2 },
+
+{ id:"sh_clarity_061", text:"I don’t feel mixed up emotionally.", dimension:"clarity", level:3 },
+{ id:"sh_clarity_062", text:"This bond doesn’t leave me guessing.", dimension:"clarity", level:3 },
+{ id:"sh_clarity_063", text:"I feel grounded in my understanding.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_064", text:"Emotional clarity feels accessible.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_065", text:"I know what I want here.", dimension:"clarity", level:2 },
+
+{ id:"sh_clarity_066", text:"I don’t feel emotionally disoriented.", dimension:"clarity", level:3 },
+{ id:"sh_clarity_067", text:"Emotional patterns make sense.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_068", text:"I don’t feel pulled in opposite directions.", dimension:"clarity", level:3 },
+{ id:"sh_clarity_069", text:"This connection feels defined enough.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_070", text:"I don’t feel emotionally scattered.", dimension:"clarity", level:3 },
+
+{ id:"sh_clarity_071", text:"I feel settled in my interpretation.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_072", text:"Emotional expectations feel clear.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_073", text:"I don’t feel confused about intentions.", dimension:"clarity", level:3 },
+{ id:"sh_clarity_074", text:"Emotional meaning feels stable.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_075", text:"I understand how I feel.", dimension:"clarity", level:2 },
+
+{ id:"sh_clarity_076", text:"I don’t feel emotionally lost.", dimension:"clarity", level:3 },
+{ id:"sh_clarity_077", text:"Emotional clarity feels steady.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_078", text:"I know what this bond gives me.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_079", text:"Emotional signals feel readable.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_080", text:"I don’t feel emotionally conflicted.", dimension:"clarity", level:3 },
+
+{ id:"sh_clarity_081", text:"This connection feels interpretable.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_082", text:"I don’t overanalyze meaning.", dimension:"clarity", level:3 },
+{ id:"sh_clarity_083", text:"Emotional understanding feels solid.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_084", text:"I feel oriented emotionally.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_085", text:"Emotional clarity feels present.", dimension:"clarity", level:2 },
+
+{ id:"sh_clarity_086", text:"I don’t feel pulled into confusion.", dimension:"clarity", level:3 },
+{ id:"sh_clarity_087", text:"Emotional meaning doesn’t shift constantly.", dimension:"clarity", level:3 },
+{ id:"sh_clarity_088", text:"I feel emotionally anchored.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_089", text:"This bond feels understandable.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_090", text:"Emotional clarity outweighs confusion.", dimension:"clarity", level:2 },
+
+{ id:"sh_clarity_091", text:"I don’t feel emotionally foggy.", dimension:"clarity", level:3 },
+{ id:"sh_clarity_092", text:"Emotional understanding feels calm.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_093", text:"I feel clear about expectations.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_094", text:"Emotional meaning feels consistent.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_095", text:"I don’t feel emotionally uncertain.", dimension:"clarity", level:3 },
+
+{ id:"sh_clarity_096", text:"Emotional clarity feels supportive.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_097", text:"I feel emotionally aligned.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_098", text:"Emotional confusion feels minimal.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_099", text:"I know where I stand.", dimension:"clarity", level:2 },
+{ id:"sh_clarity_100", text:"Emotional clarity feels grounding.", dimension:"clarity", level:2 },
+/* =====================================================
+   3️⃣ NERVOUS SYSTEM SAFETY (101–150)
+===================================================== */
+
+{ id:"sh_nervous_101", text:"My body feels calm around this connection.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_102", text:"I don’t feel on edge emotionally.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_103", text:"My nervous system feels settled.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_104", text:"I don’t feel anxious without clear reason.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_105", text:"My body doesn’t tense up thinking about this.", dimension:"nervous_system", level:3 },
+
+{ id:"sh_nervous_106", text:"I feel physically relaxed.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_107", text:"I don’t feel hyper-alert.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_108", text:"Emotional calm feels accessible.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_109", text:"My body doesn’t feel stressed.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_110", text:"I don’t feel a constant sense of unease.", dimension:"nervous_system", level:3 },
+
+{ id:"sh_nervous_111", text:"My nervous system feels regulated.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_112", text:"I feel emotionally safe.", dimension:"nervous_system", level:4 },
+{ id:"sh_nervous_113", text:"My body feels at ease.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_114", text:"I don’t feel emotionally jittery.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_115", text:"Calm feels natural.", dimension:"nervous_system", level:2 },
+
+{ id:"sh_nervous_116", text:"My body doesn’t react with stress.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_117", text:"I feel emotionally steady.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_118", text:"My nervous system isn’t overstimulated.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_119", text:"I feel grounded.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_120", text:"My body feels relaxed after interactions.", dimension:"nervous_system", level:3 },
+
+{ id:"sh_nervous_121", text:"I don’t feel emotionally activated.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_122", text:"Calm doesn’t feel forced.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_123", text:"My body doesn’t brace for impact.", dimension:"nervous_system", level:4 },
+{ id:"sh_nervous_124", text:"I feel emotionally settled.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_125", text:"Nervous energy feels low.", dimension:"nervous_system", level:2 },
+
+{ id:"sh_nervous_126", text:"My system feels balanced.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_127", text:"I don’t feel emotionally dysregulated.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_128", text:"Calm feels sustainable.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_129", text:"My body feels secure.", dimension:"nervous_system", level:4 },
+{ id:"sh_nervous_130", text:"I don’t feel emotionally reactive.", dimension:"nervous_system", level:3 },
+
+{ id:"sh_nervous_131", text:"Emotional calm feels consistent.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_132", text:"My nervous system feels supported.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_133", text:"I don’t feel constantly alert.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_134", text:"My body feels safe.", dimension:"nervous_system", level:4 },
+{ id:"sh_nervous_135", text:"I feel emotionally regulated.", dimension:"nervous_system", level:3 },
+
+{ id:"sh_nervous_136", text:"Calm feels present.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_137", text:"My nervous system feels stable.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_138", text:"I don’t feel tense.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_139", text:"Emotional calm feels reliable.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_140", text:"My body doesn’t feel threatened.", dimension:"nervous_system", level:4 },
+
+{ id:"sh_nervous_141", text:"I feel emotionally safe in myself.", dimension:"nervous_system", level:4 },
+{ id:"sh_nervous_142", text:"Calm feels accessible.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_143", text:"My nervous system isn’t overloaded.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_144", text:"I feel relaxed internally.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_145", text:"Emotional steadiness feels natural.", dimension:"nervous_system", level:2 },
+
+{ id:"sh_nervous_146", text:"My body feels comfortable.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_147", text:"I don’t feel emotionally agitated.", dimension:"nervous_system", level:3 },
+{ id:"sh_nervous_148", text:"Calm feels genuine.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_149", text:"My system feels peaceful.", dimension:"nervous_system", level:2 },
+{ id:"sh_nervous_150", text:"Emotional calm outweighs anxiety.", dimension:"nervous_system", level:4 },
+
+/* =====================================================
+   4️⃣ SELF-TRUST & INNER SIGNALS (151–200)
+===================================================== */
+
+{ id:"sh_trust_151", text:"I trust my feelings about this connection.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_152", text:"I don’t dismiss my inner signals.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_153", text:"My intuition feels reliable.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_154", text:"I listen to my emotional responses.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_155", text:"I don’t override my discomfort.", dimension:"self_trust", level:4 },
+
+{ id:"sh_trust_156", text:"I trust my judgment.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_157", text:"My feelings feel valid.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_158", text:"I don’t second-guess my instincts.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_159", text:"I respect my emotional boundaries.", dimension:"self_trust", level:4 },
+{ id:"sh_trust_160", text:"I trust myself to know what’s right.", dimension:"self_trust", level:3 },
+
+{ id:"sh_trust_161", text:"My inner voice feels clear.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_162", text:"I don’t gaslight myself emotionally.", dimension:"self_trust", level:4 },
+{ id:"sh_trust_163", text:"I trust my emotional reactions.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_164", text:"My instincts feel trustworthy.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_165", text:"I don’t ignore internal red flags.", dimension:"self_trust", level:4 },
+
+{ id:"sh_trust_166", text:"I trust my emotional experience.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_167", text:"I listen to my body.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_168", text:"I don’t minimize my feelings.", dimension:"self_trust", level:4 },
+{ id:"sh_trust_169", text:"My self-trust feels intact.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_170", text:"I believe my emotional signals.", dimension:"self_trust", level:3 },
+
+{ id:"sh_trust_171", text:"I don’t doubt my inner sense.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_172", text:"I trust my responses.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_173", text:"My intuition feels aligned.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_174", text:"I honor my feelings.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_175", text:"I trust myself emotionally.", dimension:"self_trust", level:3 },
+
+{ id:"sh_trust_176", text:"I don’t talk myself out of discomfort.", dimension:"self_trust", level:4 },
+{ id:"sh_trust_177", text:"My self-trust feels strong.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_178", text:"I rely on my inner signals.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_179", text:"I trust my perspective.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_180", text:"I don’t abandon myself emotionally.", dimension:"self_trust", level:4 },
+
+{ id:"sh_trust_181", text:"My inner guidance feels present.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_182", text:"I respect my emotional truth.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_183", text:"I trust my emotional clarity.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_184", text:"My instincts don’t feel muted.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_185", text:"I listen to emotional cues.", dimension:"self_trust", level:3 },
+
+{ id:"sh_trust_186", text:"My self-trust feels stable.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_187", text:"I don’t override my intuition.", dimension:"self_trust", level:4 },
+{ id:"sh_trust_188", text:"I trust my inner compass.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_189", text:"I believe my feelings matter.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_190", text:"I don’t dismiss emotional data.", dimension:"self_trust", level:4 },
+
+{ id:"sh_trust_191", text:"My emotional signals feel clear.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_192", text:"I trust myself to decide.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_193", text:"I honor emotional information.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_194", text:"My intuition feels supported.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_195", text:"I trust my inner knowing.", dimension:"self_trust", level:3 },
+
+{ id:"sh_trust_196", text:"I don’t silence my discomfort.", dimension:"self_trust", level:4 },
+{ id:"sh_trust_197", text:"My emotional truth feels valid.", dimension:"self_trust", level:3 },
+{ id:"sh_trust_198", text:"I trust myself here.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_199", text:"My self-trust feels grounded.", dimension:"self_trust", level:2 },
+{ id:"sh_trust_200", text:"I rely on my internal signals.", dimension:"self_trust", level:3 },
+];
+</script>
+<script>
+const SOLO_LEVELS = {
+  level1: { maxLevel: 1, count: 10 },
+  level2: { maxLevel: 2, count: 15 },
+  level3: { maxLevel: 3, count: 20 },
+  level4: { maxLevel: 4, count: 25 },
+};
+</script>
+<script>
+  const GUESS_QUESTIONS = [
+
+/* =========================================================
+   1–40 : PREFERENCES (LEVEL 1)
+========================================================= */
+
+{ id:"gg_0001", text:"When something important comes up, would this person rather text it out or call immediately?", type:"preference", dimension:"communication", level:1 },
+{ id:"gg_0002", text:"When making plans, does this person like deciding in advance or figuring things out as they go?", type:"preference", dimension:"habits", level:1 },
+{ id:"gg_0003", text:"In social settings, does this person feel more comfortable in small groups or large gatherings?", type:"preference", dimension:"social", level:1 },
+{ id:"gg_0004", text:"On weekends, does this person usually prefer staying in or going out?", type:"preference", dimension:"habits", level:1 },
+{ id:"gg_0005", text:"In daily life, does this person rely more on routines or flexible schedules?", type:"preference", dimension:"habits", level:1 },
+{ id:"gg_0006", text:"When working on something, does this person prefer working alone or with others?", type:"preference", dimension:"work", level:1 },
+{ id:"gg_0007", text:"When emotional, does this person express it openly or keep it private?", type:"preference", dimension:"emotions", level:1 },
+{ id:"gg_0008", text:"In conversations, does this person enjoy deep talks or light, casual chats more?", type:"preference", dimension:"communication", level:1 },
+{ id:"gg_0009", text:"When choosing activities, does this person stick to comfort or try new things?", type:"preference", dimension:"preferences", level:1 },
+{ id:"gg_0010", text:"Is this person more of an early riser or a late-night person?", type:"preference", dimension:"habits", level:1 },
+
+{ id:"gg_0011", text:"In life overall, does this person value stability or excitement more?", type:"preference", dimension:"values", level:1 },
+{ id:"gg_0012", text:"When deciding, does this person decide quickly or think things through?", type:"preference", dimension:"values", level:1 },
+{ id:"gg_0013", text:"In close relationships, does this person prefer giving space or staying closely connected?", type:"preference", dimension:"social", level:1 },
+{ id:"gg_0014", text:"Does this person prefer structure and plans or freedom and flexibility?", type:"preference", dimension:"habits", level:1 },
+{ id:"gg_0015", text:"In conversations, does this person usually listen more or talk more?", type:"preference", dimension:"communication", level:1 },
+{ id:"gg_0016", text:"Would this person rather communicate face-to-face or digitally?", type:"preference", dimension:"communication", level:1 },
+{ id:"gg_0017", text:"Does this person feel safer with certainty or with taking risks?", type:"preference", dimension:"values", level:1 },
+{ id:"gg_0018", text:"Does this person feel more comfortable in quiet places or lively environments?", type:"preference", dimension:"preferences", level:1 },
+{ id:"gg_0019", text:"When working, does this person focus on one task or multitask?", type:"preference", dimension:"work", level:1 },
+{ id:"gg_0020", text:"With food, does this person stick to familiar choices or experiment?", type:"preference", dimension:"preferences", level:1 },
+
+{ id:"gg_0021", text:"Does this person prefer saving money or spending on experiences?", type:"preference", dimension:"values", level:1 },
+{ id:"gg_0022", text:"Does this person enjoy predictability or surprises more?", type:"preference", dimension:"values", level:1 },
+{ id:"gg_0023", text:"In communication, is this person more direct or indirect?", type:"preference", dimension:"communication", level:1 },
+{ id:"gg_0024", text:"At work, does this person perform better under pressure or at a steady pace?", type:"preference", dimension:"work", level:1 },
+{ id:"gg_0025", text:"Socially, does this person like meeting people often or only occasionally?", type:"preference", dimension:"social", level:1 },
+{ id:"gg_0026", text:"In daily life, does this person prefer order or creative mess?", type:"preference", dimension:"habits", level:1 },
+{ id:"gg_0027", text:"When are they more productive—morning or late night?", type:"preference", dimension:"habits", level:1 },
+{ id:"gg_0028", text:"When planning work, does this person like details or broad outlines?", type:"preference", dimension:"work", level:1 },
+{ id:"gg_0029", text:"Does this person prefer emotional discussions or practical problem-solving?", type:"preference", dimension:"communication", level:1 },
+{ id:"gg_0030", text:"Does this person prefer familiarity or novelty?", type:"preference", dimension:"preferences", level:1 },
+
+{ id:"gg_0031", text:"Does this person value independence more or collaboration?", type:"preference", dimension:"values", level:1 },
+{ id:"gg_0032", text:"Does this person prefer fewer options or many choices?", type:"preference", dimension:"preferences", level:1 },
+{ id:"gg_0033", text:"In relationships, does this person value stability or freedom more?", type:"preference", dimension:"values", level:1 },
+{ id:"gg_0034", text:"When issues arise, does this person address them quickly or wait?", type:"preference", dimension:"communication", level:1 },
+{ id:"gg_0035", text:"Does this person rely more on logic or gut feeling?", type:"preference", dimension:"values", level:1 },
+{ id:"gg_0036", text:"While working, does this person prefer silence or background noise?", type:"preference", dimension:"work", level:1 },
+{ id:"gg_0037", text:"Does this person prefer clear rules or flexible guidelines?", type:"preference", dimension:"values", level:1 },
+{ id:"gg_0038", text:"Does this person like being prepared or improvising?", type:"preference", dimension:"habits", level:1 },
+{ id:"gg_0039", text:"Socially, does this person prefer one-on-one time or group settings?", type:"preference", dimension:"social", level:1 },
+{ id:"gg_0040", text:"Does this person prefer consistency or variety in life?", type:"preference", dimension:"preferences", level:1 },
+
+/* =========================================================
+   41–70 : INTRINSIC TENDENCIES (LEVEL 2)
+========================================================= */
+
+{ id:"gg_0041", text:"This person tends to overthink decisions after making them.", type:"intrinsic", dimension:"emotions", level:2 },
+{ id:"gg_0042", text:"This person adapts easily when plans change.", type:"intrinsic", dimension:"stress", level:2 },
+{ id:"gg_0043", text:"This person usually stays calm under pressure.", type:"intrinsic", dimension:"stress", level:2 },
+{ id:"gg_0044", text:"This person avoids confrontation when possible.", type:"intrinsic", dimension:"communication", level:2 },
+{ id:"gg_0045", text:"This person needs alone time to recharge after socialising.", type:"intrinsic", dimension:"social", level:2 },
+{ id:"gg_0046", text:"This person expresses appreciation easily.", type:"intrinsic", dimension:"communication", level:2 },
+{ id:"gg_0047", text:"This person finds it hard to say no, even when overwhelmed.", type:"intrinsic", dimension:"communication", level:2 },
+{ id:"gg_0048", text:"This person usually completes tasks once started.", type:"intrinsic", dimension:"work", level:2 },
+{ id:"gg_0049", text:"This person gets emotionally affected by small things.", type:"intrinsic", dimension:"emotions", level:2 },
+{ id:"gg_0050", text:"This person prefers clarity and certainty.", type:"intrinsic", dimension:"values", level:2 },
+
+{ id:"gg_0051", text:"This person is comfortable not having all the answers.", type:"intrinsic", dimension:"values", level:2 },
+{ id:"gg_0052", text:"This person often replays past conversations in their mind.", type:"intrinsic", dimension:"emotions", level:2 },
+{ id:"gg_0053", text:"This person handles stress internally rather than expressing it.", type:"intrinsic", dimension:"stress", level:2 },
+{ id:"gg_0054", text:"This person finds it easy to open up emotionally.", type:"intrinsic", dimension:"emotions", level:2 },
+{ id:"gg_0055", text:"This person prefers keeping emotions private.", type:"intrinsic", dimension:"emotions", level:2 },
+{ id:"gg_0056", text:"This person is consistent with commitments.", type:"intrinsic", dimension:"work", level:2 },
+{ id:"gg_0057", text:"This person often doubts their decisions after making them.", type:"intrinsic", dimension:"emotions", level:2 },
+{ id:"gg_0058", text:"This person feels safest when things are predictable.", type:"intrinsic", dimension:"values", level:2 },
+{ id:"gg_0059", text:"This person recovers emotionally fairly quickly after setbacks.", type:"intrinsic", dimension:"emotions", level:2 },
+{ id:"gg_0060", text:"This person seeks reassurance when unsure.", type:"intrinsic", dimension:"emotions", level:2 },
+
+/* =========================================================
+   71–100 : SITUATIONAL (LEVEL 3)
+========================================================= */
+
+{ id:"gg_0071", text:"If plans change suddenly, this person would adjust without much stress.", type:"situational", dimension:"stress", level:3 },
+{ id:"gg_0072", text:"If criticised in front of others, this person would stay composed.", type:"situational", dimension:"emotions", level:3 },
+{ id:"gg_0073", text:"If running late, this person would inform others proactively.", type:"situational", dimension:"communication", level:3 },
+{ id:"gg_0074", text:"If overwhelmed at work, this person would ask for help instead of shutting down.", type:"situational", dimension:"work", level:3 },
+{ id:"gg_0075", text:"If misunderstood, this person would try to clarify calmly.", type:"situational", dimension:"communication", level:3 },
+
+{ id:"gg_0076", text:"If expectations are unclear, this person would ask questions.", type:"situational", dimension:"communication", level:3 },
+{ id:"gg_0077", text:"If plans are cancelled, this person would handle the disappointment calmly.", type:"situational", dimension:"emotions", level:3 },
+{ id:"gg_0078", text:"If stress builds up, this person would find a healthy way to cope.", type:"situational", dimension:"stress", level:3 },
+{ id:"gg_0079", text:"If conflict arises, this person would try to resolve it rather than avoid it.", type:"situational", dimension:"communication", level:3 },
+{ id:"gg_0080", text:"If responsibilities increase suddenly, this person would step up.", type:"situational", dimension:"work", level:3 }
+
+];
+  </script>
+  <script>
+  /* ✅ ADD IT HERE */
+const GUESS_LEVELS = {
+  level1: {
+    label: "Quick read",
+    description: "Light prediction scan",
+    count: 5,
+  },
+  level2: {
+    label: "Pattern sense",
+    description: "See recurring response patterns",
+    count: 8,
+    note: "Most people start here",
+  },
+  level3: {
+    label: "Blind spots",
+    description: "Where perception diverges",
+    count: 12,
+  },
+  level4: {
+    label: "Full prediction",
+    description: "Deep partner model",
+    count: 16,
+  },
+};
+</script>
+<script>
+/* =====================================================
+   IDEAL MATCH — LEVELLED QUESTION BANK
+   (INLINE BABEL SAFE | ENGINE COMPATIBLE)
+===================================================== */
+
+function buildIdealLevel(levelKey, levelNum, questions) {
+  return questions.map((text, i) => ({
+    id: `ideal_${levelKey}_${String(i + 1).padStart(2, "0")}`,
+    text,
+    level: levelNum,
+    scale: 5 // 1–5 importance
+  }));
+}
+
+/* ---------- LEVEL 1: CORE ---------- */
+const IDEAL_CORE = buildIdealLevel("core", 1, [
+  "How important is emotional maturity in a partner?",
+  "How important is honesty even when uncomfortable?",
+  "How important is emotional availability?",
+  "How important is feeling emotionally safe with someone?",
+  "How important is mutual respect during conflict?",
+  "How important is clear communication?",
+  "How important is trustworthiness?",
+  "How important is kindness in daily interactions?",
+  "How important is consistency in behavior?",
+  "How important is being able to rely on a partner?"
+]);
+
+/* ---------- LEVEL 2: PERSONALITY ---------- */
+const IDEAL_PERSONALITY = buildIdealLevel("personality", 2, [
+  "How important is emotional intelligence?",
+  "How important is self-awareness in a partner?",
+  "How important is curiosity and openness to growth?",
+  "How important is empathy?",
+  "How important is emotional depth?",
+  "How tolerant are you of emotional messiness?",
+  "How forgiving are you of emotional mistakes?",
+  "How important is vulnerability from a partner?",
+  "How important is humor compatibility?",
+  "How sensitive are you to emotional inconsistency?"
+]);
+
+/* ---------- LEVEL 3: VALUES ---------- */
+const IDEAL_VALUES = buildIdealLevel("values", 3, [
+  "How important is alignment on core values?",
+  "How important is similar outlook on life?",
+  "How important is growth mindset?",
+  "How important is ethical alignment?",
+  "How important is family value alignment?",
+  "How important is long-term thinking?",
+  "How important is accountability?",
+  "How important is ambition or purpose?",
+  "How important is similar definition of success?",
+  "How flexible are you on belief differences?"
+]);
+
+/* ---------- LEVEL 4: LIFESTYLE ---------- */
+const IDEAL_LIFESTYLE = buildIdealLevel("lifestyle", 4, [
+  "How important is similar daily routine?",
+  "How important is similar social energy (introvert/extrovert)?",
+  "How important is shared health or fitness mindset?",
+  "How important is similar sleep schedule?",
+  "How tolerant are you of different cleanliness standards?",
+  "How important is shared leisure preference?",
+  "How important is similar travel style?",
+  "How adaptable are you to someone else's habits?",
+  "How much does lifestyle friction bother you?",
+  "How important is work-life balance compatibility?"
+]);
+
+/* ---------- LEVEL 5: ATTRACTION ---------- */
+const IDEAL_ATTRACTION = buildIdealLevel("attraction", 5, [
+  "How important is physical attraction for long-term bonding?",
+  "How strict are you about physical preferences?",
+  "How important is sexual compatibility?",
+  "How important is affection and touch?",
+  "How tolerant are you of mismatched libido?",
+  "How important is consistent chemistry?",
+  "How quickly do you expect attraction to stabilize?",
+  "How flexible are you about appearance differences?",
+  "How much does attraction affect emotional patience?",
+  "How important is mutual desire expression?"
+]);
+
+/* ---------- LEVEL 6: RELATIONSHIP DESIGN ---------- */
+const IDEAL_RELATIONSHIP = buildIdealLevel("relationship", 6, [
+  "How important is relationship clarity early on?",
+  "How important is commitment alignment?",
+  "How tolerant are you of ambiguity in dating?",
+  "How important is monogamy?",
+  "How important is shared future planning?",
+  "How important is emotional labor balance?",
+  "How important is conflict repair skill?",
+  "How much effort should a partner invest early?",
+  "How important is emotional reassurance?",
+  "How aligned must long-term timelines be?"
+]);
+
+/* ---------- LEVEL 7: GEO & REALITY ---------- */
+const IDEAL_GEO = buildIdealLevel("geo", 7, [
+  "How important is living in the same city?",
+  "How open are you to long-distance relationships?",
+  "How flexible are you about relocation?",
+  "How important is similar cultural environment?",
+  "How large do you think your dating pool is locally?",
+  "How realistic do you think your standards are where you live?",
+  "How patient are you with limited options?",
+  "How open are you to meeting outside your usual circles?",
+  "How much do logistics affect attraction?",
+  "How willing are you to compromise on non-core traits?"
+]);
+
+/* ---------- LEVEL 8: META AWARENESS ---------- */
+const IDEAL_META = buildIdealLevel("meta", 8, [
+  "How aware are you of your own biases?",
+  "How often do you reassess your expectations?",
+  "How open are you to being wrong about your type?",
+  "How much do past experiences shape your standards?",
+  "How flexible are you when reality differs from ideal?",
+  "How willing are you to grow with someone?",
+  "How important is mutual adaptation?",
+  "How tolerant are you of imperfect matches?",
+  "How much uncertainty can you emotionally hold?",
+  "How open are you to unexpected connections?"
+]);
+
+/* ---------- MASTER EXPORT ---------- */
+const IDEAL_QUESTION_LEVELS = {
+  core: IDEAL_CORE,
+  personality: IDEAL_PERSONALITY,
+  values: IDEAL_VALUES,
+  lifestyle: IDEAL_LIFESTYLE,
+  attraction: IDEAL_ATTRACTION,
+  relationship: IDEAL_RELATIONSHIP,
+  geo: IDEAL_GEO,
+  meta: IDEAL_META,
+};
+
+
+
+/* ---------- FLATTENED (BACKWARD COMPATIBLE) ---------- */
+const IDEAL_QUESTIONS = Object.values(IDEAL_QUESTION_LEVELS).flat();
+
+</script>
+<script>
+  /* ---------- IDEAL MATCH SCORING ---------- */
+
+function calculateIdealMatchScore(idealAnswers) {
+  const values = Object.values(idealAnswers || {});
+  if (values.length < 5) return null;
+
+  const total = values.reduce((a, b) => a + b, 0);
+  const max = values.length * 5;
+
+  return Math.round((total / max) * 100);
+}
+</script>
+<script>
+ window.PARTNER_CLONE_SUBJECTIVE_QUESTIONS = [
+{
+  id: "pcs1_01",
+  dimension: "communication",
+  text: "When something feels off, how do they usually initiate conversation, if at all?"
+},
+{
+  id: "pcs1_02",
+  dimension: "communication",
+  text: "Describe how they typically respond when an issue is raised unexpectedly."
+},
+{
+  id: "pcs1_03",
+  dimension: "communication",
+  text: "What does their communication style look like during calm, everyday interactions?"
+},
+{
+  id: "pcs1_04",
+  dimension: "communication",
+  text: "How do they usually react when conversations become emotionally intense?"
+},
+{
+  id: "pcs1_05",
+  dimension: "communication",
+  text: "Describe how directly or indirectly they express concerns."
+},
+
+{
+  id: "pcs1_06",
+  dimension: "stress",
+  text: "What changes in their behaviour signal that they are feeling stressed?"
+},
+{
+  id: "pcs1_07",
+  dimension: "stress",
+  text: "How do they tend to communicate when they are under pressure?"
+},
+{
+  id: "pcs1_08",
+  dimension: "stress",
+  text: "What do they usually need most when stress first appears?"
+},
+{
+  id: "pcs1_09",
+  dimension: "stress",
+  text: "Describe how they act when expectations rise suddenly."
+},
+{
+  id: "pcs1_10",
+  dimension: "stress",
+  text: "What is their most noticeable stress response in daily life?"
+},
+
+{
+  id: "pcs1_11",
+  dimension: "emotions",
+  text: "How openly do they express emotions when they feel safe?"
+},
+{
+  id: "pcs1_12",
+  dimension: "emotions",
+  text: "What emotional cues indicate that they are feeling unsettled?"
+},
+{
+  id: "pcs1_13",
+  dimension: "emotions",
+  text: "How quickly do they usually move past emotional discomfort?"
+},
+{
+  id: "pcs1_14",
+  dimension: "emotions",
+  text: "Describe how small changes in behaviour affect them emotionally."
+},
+{
+  id: "pcs1_15",
+  dimension: "emotions",
+  text: "What helps them regain emotional balance after minor disruptions?"
+},
+
+{
+  id: "pcs2_01",
+  dimension: "emotions",
+  text: "Describe how they emotionally process situations that matter deeply to them."
+},
+{
+  id: "pcs2_02",
+  dimension: "emotions",
+  text: "How long do emotional experiences usually stay with them?"
+},
+{
+  id: "pcs2_03",
+  dimension: "emotions",
+  text: "What signs show that they are overthinking a situation?"
+},
+{
+  id: "pcs2_04",
+  dimension: "emotions",
+  text: "How do unclear emotional signals affect their mood or behaviour?"
+},
+{
+  id: "pcs2_05",
+  dimension: "emotions",
+  text: "What helps them feel emotionally grounded again?"
+},
+
+{
+  id: "pcs2_06",
+  dimension: "communication",
+  text: "How do they usually seek clarity when something feels confusing?"
+},
+{
+  id: "pcs2_07",
+  dimension: "communication",
+  text: "Describe how they handle misunderstandings once they notice them."
+},
+{
+  id: "pcs2_08",
+  dimension: "communication",
+  text: "What communication patterns repeat during emotionally charged moments?"
+},
+{
+  id: "pcs2_09",
+  dimension: "communication",
+  text: "How do they soften or adjust their words to manage conflict?"
+},
+{
+  id: "pcs2_10",
+  dimension: "communication",
+  text: "What communication habits seem to drain them emotionally?"
+},
+
+{
+  id: "pcs2_11",
+  dimension: "stress",
+  text: "How does stress change the way they express themselves?"
+},
+{
+  id: "pcs2_12",
+  dimension: "stress",
+  text: "Describe what they tend to withdraw from when stress builds."
+},
+{
+  id: "pcs2_13",
+  dimension: "stress",
+  text: "What kind of reassurance helps them most during stressful periods?"
+},
+{
+  id: "pcs2_14",
+  dimension: "stress",
+  text: "How do they usually recover once stress begins to fade?"
+},
+{
+  id: "pcs2_15",
+  dimension: "stress",
+  text: "What behaviours signal that stress is lingering longer than usual?"
+},
+
+{
+  id: "pcs2_16",
+  dimension: "values",
+  text: "What patterns show how important consistency is to them?"
+},
+{
+  id: "pcs2_17",
+  dimension: "values",
+  text: "How do they react when emotional effort feels unbalanced?"
+},
+{
+  id: "pcs2_18",
+  dimension: "values",
+  text: "What behaviours make them feel emotionally secure?"
+},
+{
+  id: "pcs2_19",
+  dimension: "values",
+  text: "Describe how they prioritise emotional stability versus intensity."
+},
+{
+  id: "pcs2_20",
+  dimension: "values",
+  text: "What signals tell them that emotional effort is mutual?"
+},
+
+{
+  id: "pcs2_21",
+  dimension: "boundaries",
+  text: "How do they signal discomfort before fully withdrawing?"
+},
+{
+  id: "pcs2_22",
+  dimension: "boundaries",
+  text: "What happens when their emotional limits are tested?"
+},
+{
+  id: "pcs2_23",
+  dimension: "boundaries",
+  text: "Describe how they pause or pull back during emotional overload."
+},
+{
+  id: "pcs2_24",
+  dimension: "boundaries",
+  text: "What helps them re-engage after emotional distance?"
+},
+{
+  id: "pcs2_25",
+  dimension: "boundaries",
+  text: "How do they behave once emotional balance starts returning?"
+},
+
+{
+  id: "pcs3_01",
+  dimension: "boundaries",
+  text: "Describe what causes them to disengage emotionally after conflict."
+},
+{
+  id: "pcs3_02",
+  dimension: "boundaries",
+  text: "How do they typically protect themselves when boundaries feel crossed?"
+},
+{
+  id: "pcs3_03",
+  dimension: "boundaries",
+  text: "What behaviours signal that trust has been shaken?"
+},
+{
+  id: "pcs3_04",
+  dimension: "boundaries",
+  text: "How cautious do they become after emotional hurt?"
+},
+{
+  id: "pcs3_05",
+  dimension: "boundaries",
+  text: "What helps them begin to trust again after damage?"
+},
+
+{
+  id: "pcs3_06",
+  dimension: "repair",
+  text: "Describe how they prefer conflicts to be repaired."
+},
+{
+  id: "pcs3_07",
+  dimension: "repair",
+  text: "How quickly or slowly do they re-engage after repair conversations?"
+},
+{
+  id: "pcs3_08",
+  dimension: "repair",
+  text: "What makes repair conversations feel safe for them?"
+},
+{
+  id: "pcs3_09",
+  dimension: "repair",
+  text: "How do they behave once repair feels incomplete?"
+},
+{
+  id: "pcs3_10",
+  dimension: "repair",
+  text: "What signals that repair has genuinely worked for them?"
+},
+
+{
+  id: "pcs3_11",
+  dimension: "values",
+  text: "What behaviours consistently make them feel emotionally secure?"
+},
+{
+  id: "pcs3_12",
+  dimension: "values",
+  text: "How do they define mutual effort through actions?"
+},
+{
+  id: "pcs3_13",
+  dimension: "values",
+  text: "What patterns indicate that emotional alignment matters to them?"
+},
+{
+  id: "pcs3_14",
+  dimension: "values",
+  text: "Describe what emotional predictability looks like to them."
+},
+{
+  id: "pcs3_15",
+  dimension: "values",
+  text: "How do they behave when consistency is restored?"
+},
+
+{
+  id: "pcs3_16",
+  dimension: "attachment",
+  text: "How do they respond when emotional intensity rises quickly?"
+},
+{
+  id: "pcs3_17",
+  dimension: "attachment",
+  text: "What makes them hesitate emotionally?"
+},
+{
+  id: "pcs3_18",
+  dimension: "attachment",
+  text: "How do they manage closeness after distance?"
+},
+{
+  id: "pcs3_19",
+  dimension: "attachment",
+  text: "What patterns show how they reopen emotionally?"
+},
+{
+  id: "pcs3_20",
+  dimension: "attachment",
+  text: "Describe how emotional safety affects their openness."
+},
+
+{
+  id: "pcs3_21",
+  dimension: "stress",
+  text: "How does prolonged stress change their emotional availability?"
+},
+{
+  id: "pcs3_22",
+  dimension: "stress",
+  text: "What helps them stabilise after extended stress?"
+},
+{
+  id: "pcs3_23",
+  dimension: "stress",
+  text: "How long do stress effects linger once pressure reduces?"
+},
+{
+  id: "pcs3_24",
+  dimension: "stress",
+  text: "What support helps them recover emotionally from stress?"
+},
+{
+  id: "pcs3_25",
+  dimension: "stress",
+  text: "What signals that they are ready to reconnect after stress?"
+},
+
+{
+  id: "pcs3_26",
+  dimension: "trust",
+  text: "What behaviours rebuild trust most effectively for them?"
+},
+{
+  id: "pcs3_27",
+  dimension: "trust",
+  text: "How do they test consistency after conflict?"
+},
+{
+  id: "pcs3_28",
+  dimension: "trust",
+  text: "Describe how they monitor behaviour changes over time."
+},
+{
+  id: "pcs3_29",
+  dimension: "trust",
+  text: "What allows them to fully settle emotionally again?"
+},
+{
+  id: "pcs3_30",
+  dimension: "trust",
+  text: "How do they behave once emotional balance feels permanent?"
+}
+];
+</script>
+<script>
+  window.PARTNER_CLONE_MCQ_QUESTIONS = [
+  /* ================= LEVEL 1 — DAILY, OBSERVABLE (15) ================= */
+
+  { "id":"pcm_001", "text":"They usually reply quickly when something feels off between you.", "dimension":"communication", "weightKey":"quick_response", "polarity":1, "level":1 },
+  { "id":"pcm_002", "text":"They often take hours or longer to reply after an emotional message.", "dimension":"communication", "weightKey":"delayed_response", "polarity":-1, "level":1 },
+  { "id":"pcm_003", "text":"They prefer talking things out rather than letting tension sit.", "dimension":"communication", "weightKey":"talk_it_out", "polarity":1, "level":1 },
+  { "id":"pcm_004", "text":"They avoid conversations when emotions run high.", "dimension":"communication", "weightKey":"avoid_intensity", "polarity":-1, "level":1 },
+  { "id":"pcm_005", "text":"They communicate more clearly in calm moments than during conflict.", "dimension":"communication", "weightKey":"calm_communicator", "polarity":1, "level":1 },
+  { "id":"pcm_006", "text":"They become quieter when they feel misunderstood.", "dimension":"communication", "weightKey":"quiet_when_misunderstood", "polarity":-1, "level":1 },
+  { "id":"pcm_007", "text":"They notice small changes in tone or behaviour.", "dimension":"communication", "weightKey":"tone_awareness", "polarity":1, "level":1 },
+  { "id":"pcm_008", "text":"They hesitate before sending emotionally honest texts.", "dimension":"communication", "weightKey":"hesitant_texting", "polarity":-1, "level":1 },
+  { "id":"pcm_009", "text":"They prefer direct words over hints or silence.", "dimension":"communication", "weightKey":"direct_style", "polarity":1, "level":1 },
+  { "id":"pcm_010", "text":"They feel drained after long emotional conversations.", "dimension":"communication", "weightKey":"emotional_fatigue", "polarity":-1, "level":1 },
+  { "id":"pcm_011", "text":"They like clearing misunderstandings quickly.", "dimension":"communication", "weightKey":"fast_closure", "polarity":1, "level":1 },
+  { "id":"pcm_012", "text":"They soften their words to avoid conflict.", "dimension":"communication", "weightKey":"conflict_softening", "polarity":-1, "level":1 },
+  { "id":"pcm_013", "text":"They pull back when conversations feel repetitive.", "dimension":"communication", "weightKey":"repetition_shutdown", "polarity":-1, "level":1 },
+  { "id":"pcm_014", "text":"They communicate better when reassured.", "dimension":"communication", "weightKey":"reassurance_opens", "polarity":1, "level":1 },
+  { "id":"pcm_015", "text":"They prefer addressing issues rather than ignoring them.", "dimension":"communication", "weightKey":"issue_facing", "polarity":1, "level":1 },
+
+  /* ================= LEVEL 2 — PATTERNS & EMOTIONS (25) ================= */
+
+  { "id":"pcm_016", "text":"They carry emotional moments with them for a long time.", "dimension":"emotions", "weightKey":"emotional_lingering", "polarity":-1, "level":2 },
+  { "id":"pcm_017", "text":"They recover emotionally faster than most people.", "dimension":"emotions", "weightKey":"fast_recovery", "polarity":1, "level":2 },
+  { "id":"pcm_018", "text":"They feel unsettled when emotional situations are unclear.", "dimension":"emotions", "weightKey":"uncertainty_anxiety", "polarity":-1, "level":2 },
+  { "id":"pcm_019", "text":"They need reassurance to feel emotionally steady.", "dimension":"emotions", "weightKey":"needs_reassurance", "polarity":-1, "level":2 },
+  { "id":"pcm_020", "text":"They tend to overthink situations that matter to them.", "dimension":"emotions", "weightKey":"overthinking", "polarity":-1, "level":2 },
+  { "id":"pcm_021", "text":"They compartmentalise emotions to stay functional.", "dimension":"emotions", "weightKey":"compartmentalise", "polarity":1, "level":2 },
+  { "id":"pcm_022", "text":"They are emotionally affected by small changes in behaviour.", "dimension":"emotions", "weightKey":"micro_signal_sensitive", "polarity":-1, "level":2 },
+  { "id":"pcm_023", "text":"They prefer emotional stability over emotional highs.", "dimension":"emotions", "weightKey":"stability_preference", "polarity":1, "level":2 },
+  { "id":"pcm_024", "text":"Clear emotional expectations help them feel grounded.", "dimension":"emotions", "weightKey":"clarity_grounding", "polarity":1, "level":2 },
+  { "id":"pcm_025", "text":"They struggle when emotional effort feels one-sided.", "dimension":"emotions", "weightKey":"effort_imbalance", "polarity":-1, "level":2 },
+  { "id":"pcm_026", "text":"They need alone time to process emotions.", "dimension":"emotions", "weightKey":"solo_processing", "polarity":1, "level":2 },
+  { "id":"pcm_027", "text":"They open up only after trust builds.", "dimension":"emotions", "weightKey":"trust_before_openness", "polarity":1, "level":2 },
+  { "id":"pcm_028", "text":"Sudden emotional shifts make them anxious.", "dimension":"emotions", "weightKey":"sudden_change_anxiety", "polarity":-1, "level":2 },
+  { "id":"pcm_029", "text":"They feel relief once emotional balance returns.", "dimension":"emotions", "weightKey":"balance_relief", "polarity":1, "level":2 },
+  { "id":"pcm_030", "text":"They struggle to let go of emotional discomfort.", "dimension":"emotions", "weightKey":"slow_release", "polarity":-1, "level":2 },
+  { "id":"pcm_031", "text":"Emotional clarity noticeably improves their mood.", "dimension":"emotions", "weightKey":"clarity_relief", "polarity":1, "level":2 },
+  { "id":"pcm_032", "text":"They suppress emotions to keep things smooth.", "dimension":"emotions", "weightKey":"emotion_suppression", "polarity":-1, "level":2 },
+  { "id":"pcm_033", "text":"They are sensitive to emotional inconsistency.", "dimension":"emotions", "weightKey":"inconsistency_sensitivity", "polarity":-1, "level":2 },
+  { "id":"pcm_034", "text":"Consistent emotional effort makes them feel secure.", "dimension":"emotions", "weightKey":"consistency_security", "polarity":1, "level":2 },
+  { "id":"pcm_035", "text":"They express emotions more freely when they feel safe.", "dimension":"emotions", "weightKey":"express_when_safe", "polarity":1, "level":2 },
+  { "id":"pcm_036", "text":"They disengage emotionally when overwhelmed.", "dimension":"emotions", "weightKey":"emotional_shutdown", "polarity":-1, "level":2 },
+  { "id":"pcm_037", "text":"They need emotional clarity to stay engaged.", "dimension":"emotions", "weightKey":"needs_clarity", "polarity":1, "level":2 },
+  { "id":"pcm_038", "text":"Confusing emotional signals cause them to pull back.", "dimension":"emotions", "weightKey":"confusion_withdrawal", "polarity":-1, "level":2 },
+  { "id":"pcm_039", "text":"Emotionally honest conversations help them relax.", "dimension":"emotions", "weightKey":"honesty_relief", "polarity":1, "level":2 },
+  { "id":"pcm_040", "text":"They need emotional balance to feel connected.", "dimension":"emotions", "weightKey":"balance_need", "polarity":1, "level":2 },
+
+  /* ================= LEVEL 3 — STRESS, TRUST, BOUNDARIES (60 POOL) ================= */
+
+  { "id":"pcm_041", "text":"They shut down when stress builds up.", "dimension":"stress", "weightKey":"stress_shutdown", "polarity":-1, "level":3 },
+  { "id":"pcm_042", "text":"Under pressure, they become more controlled.", "dimension":"stress", "weightKey":"pressure_control", "polarity":1, "level":3 },
+  { "id":"pcm_043", "text":"Stress changes how they communicate.", "dimension":"stress", "weightKey":"stress_comm_shift", "polarity":-1, "level":3 },
+  { "id":"pcm_044", "text":"They prefer space when stressed.", "dimension":"stress", "weightKey":"stress_space", "polarity":1, "level":3 },
+  { "id":"pcm_045", "text":"Sudden pressure overwhelms them.", "dimension":"stress", "weightKey":"pressure_trigger", "polarity":-1, "level":3 },
+  { "id":"pcm_046", "text":"They reduce interaction when stressed.", "dimension":"stress", "weightKey":"stress_withdrawal", "polarity":-1, "level":3 },
+  { "id":"pcm_047", "text":"They need reassurance when stress is high.", "dimension":"stress", "weightKey":"stress_reassurance", "polarity":-1, "level":3 },
+  { "id":"pcm_048", "text":"They perform well under pressure.", "dimension":"stress", "weightKey":"pressure_performance", "polarity":1, "level":3 },
+  { "id":"pcm_049", "text":"Stress makes them irritable.", "dimension":"stress", "weightKey":"stress_irritability", "polarity":-1, "level":3 },
+  { "id":"pcm_050", "text":"Predictability helps them cope with stress.", "dimension":"stress", "weightKey":"stress_predictability", "polarity":1, "level":3 },
+
+  { "id":"pcm_051", "text":"They disengage when boundaries feel crossed.", "dimension":"boundaries", "weightKey":"boundary_withdrawal", "polarity":-1, "level":3 },
+  { "id":"pcm_052", "text":"They pull back when effort isn’t reciprocated.", "dimension":"boundaries", "weightKey":"effort_imbalance_exit", "polarity":-1, "level":3 },
+  { "id":"pcm_053", "text":"They need reassurance after emotional disruptions.", "dimension":"boundaries", "weightKey":"post_disruption_reassurance", "polarity":-1, "level":3 },
+  { "id":"pcm_054", "text":"They need clarity to rebuild trust.", "dimension":"boundaries", "weightKey":"trust_clarity", "polarity":1, "level":3 },
+  { "id":"pcm_055", "text":"They prefer slow repair after conflict.", "dimension":"boundaries", "weightKey":"slow_repair", "polarity":1, "level":3 },
+  { "id":"pcm_056", "text":"Reassurance helps them re-engage.", "dimension":"boundaries", "weightKey":"reassurance_reengage", "polarity":1, "level":3 },
+  { "id":"pcm_057", "text":"They monitor behaviour after conflict.", "dimension":"boundaries", "weightKey":"post_conflict_monitoring", "polarity":-1, "level":3 },
+  { "id":"pcm_058", "text":"Calm resolution increases closeness for them.", "dimension":"values", "weightKey":"calm_bonding", "polarity":1, "level":3 },
+  { "id":"pcm_059", "text":"Rapid emotional intensity makes them hesitate.", "dimension":"boundaries", "weightKey":"intensity_hesitation", "polarity":-1, "level":3 },
+  { "id":"pcm_060", "text":"Unclear communication causes withdrawal.", "dimension":"boundaries", "weightKey":"unclear_withdrawal", "polarity":-1, "level":3 },
+
+  { "id":"pcm_061", "text":"They need consistent behaviour to rebuild trust.", "dimension":"values", "weightKey":"trust_consistency", "polarity":1, "level":3 },
+  { "id":"pcm_062", "text":"They open up more when boundaries are respected.", "dimension":"boundaries", "weightKey":"boundary_openness", "polarity":1, "level":3 },
+  { "id":"pcm_063", "text":"Clear expectations make them feel safe.", "dimension":"values", "weightKey":"expectation_safety", "polarity":1, "level":3 },
+  { "id":"pcm_064", "text":"Inconsistent communication leads them to disengage.", "dimension":"boundaries", "weightKey":"inconsistency_exit", "polarity":-1, "level":3 },
+  { "id":"pcm_065", "text":"They need time before trusting again after hurt.", "dimension":"boundaries", "weightKey":"trust_rebuild_time", "polarity":1, "level":3 },
+  { "id":"pcm_066", "text":"Uneven effort causes them to pull back.", "dimension":"boundaries", "weightKey":"uneven_effort_exit", "polarity":-1, "level":3 },
+  { "id":"pcm_067", "text":"They need reassurance to fully reconnect.", "dimension":"boundaries", "weightKey":"reconnect_reassurance", "polarity":-1, "level":3 },
+  { "id":"pcm_068", "text":"They become cautious after trust is shaken.", "dimension":"boundaries", "weightKey":"trust_caution", "polarity":-1, "level":3 },
+  { "id":"pcm_069", "text":"Repair conversations help them feel safe again.", "dimension":"boundaries", "weightKey":"repair_safety", "polarity":1, "level":3 },
+  { "id":"pcm_070", "text":"They feel settled once emotional balance returns.", "dimension":"values", "weightKey":"balance_settled", "polarity":1, "level":3 },
+
+  { "id":"pcm_071", "text":"They get uneasy when conversations suddenly go quiet.", "dimension":"communication", "weightKey":"silence_anxiety", "polarity":-1, "level":3 },
+  { "id":"pcm_072", "text":"They prefer knowing what the other person is thinking rather than guessing.", "dimension":"communication", "weightKey":"prefers_clarity", "polarity":1, "level":3 },
+  { "id":"pcm_073", "text":"They read into delays or short replies.", "dimension":"communication", "weightKey":"reply_interpretation", "polarity":-1, "level":3 },
+  { "id":"pcm_074", "text":"They feel calmer when communication patterns are predictable.", "dimension":"communication", "weightKey":"pattern_comfort", "polarity":1, "level":3 },
+  { "id":"pcm_075", "text":"They shut down when they feel repeatedly misunderstood.", "dimension":"communication", "weightKey":"repeated_misunderstanding", "polarity":-1, "level":3 },
+
+  { "id":"pcm_076", "text":"They need emotional reassurance before re-engaging after conflict.", "dimension":"emotions", "weightKey":"post_conflict_reassurance", "polarity":-1, "level":3 },
+  { "id":"pcm_077", "text":"They struggle when emotional effort feels uneven over time.", "dimension":"emotions", "weightKey":"long_term_imbalance", "polarity":-1, "level":3 },
+  { "id":"pcm_078", "text":"They feel emotionally safer with steady effort rather than big gestures.", "dimension":"emotions", "weightKey":"steady_over_grand", "polarity":1, "level":3 },
+  { "id":"pcm_079", "text":"They become emotionally distant when overwhelmed.", "dimension":"emotions", "weightKey":"overwhelm_distance", "polarity":-1, "level":3 },
+  { "id":"pcm_080", "text":"They feel more secure when emotions are expressed consistently.", "dimension":"emotions", "weightKey":"consistent_expression", "polarity":1, "level":3 },
+
+  { "id":"pcm_081", "text":"They feel unsettled by mixed emotional signals.", "dimension":"emotions", "weightKey":"mixed_signals", "polarity":-1, "level":3 },
+  { "id":"pcm_082", "text":"They need time to emotionally recalibrate after arguments.", "dimension":"emotions", "weightKey":"cooldown_need", "polarity":1, "level":3 },
+  { "id":"pcm_083", "text":"They tend to replay emotional moments in their head.", "dimension":"emotions", "weightKey":"emotional_replay", "polarity":-1, "level":3 },
+  { "id":"pcm_084", "text":"They feel lighter once emotional expectations are aligned.", "dimension":"emotions", "weightKey":"expectation_alignment", "polarity":1, "level":3 },
+  { "id":"pcm_085", "text":"They feel uneasy when emotions are left unresolved.", "dimension":"emotions", "weightKey":"unresolved_discomfort", "polarity":-1, "level":3 },
+
+  { "id":"pcm_086", "text":"They withdraw socially when stress builds.", "dimension":"stress", "weightKey":"stress_social_withdrawal", "polarity":-1, "level":3 },
+  { "id":"pcm_087", "text":"They become more guarded when under prolonged stress.", "dimension":"stress", "weightKey":"stress_guarded", "polarity":-1, "level":3 },
+  { "id":"pcm_088", "text":"They need predictability to function well under stress.", "dimension":"stress", "weightKey":"stress_predictability_need", "polarity":1, "level":3 },
+  { "id":"pcm_089", "text":"They communicate less clearly when stressed.", "dimension":"stress", "weightKey":"stress_clarity_drop", "polarity":-1, "level":3 },
+  { "id":"pcm_090", "text":"They stabilise emotionally once stress levels reduce.", "dimension":"stress", "weightKey":"stress_recovery", "polarity":1, "level":3 },
+
+  { "id":"pcm_091", "text":"They prefer processing stress privately rather than sharing immediately.", "dimension":"stress", "weightKey":"private_stress_processing", "polarity":1, "level":3 },
+  { "id":"pcm_092", "text":"They need emotional patience from others when stressed.", "dimension":"stress", "weightKey":"stress_patience", "polarity":-1, "level":3 },
+  { "id":"pcm_093", "text":"They feel irritable when under sustained pressure.", "dimension":"stress", "weightKey":"pressure_irritability", "polarity":-1, "level":3 },
+  { "id":"pcm_094", "text":"They recover slowly after extended stressful periods.", "dimension":"stress", "weightKey":"slow_stress_recovery", "polarity":-1, "level":3 },
+  { "id":"pcm_095", "text":"They re-engage more fully once stress subsides.", "dimension":"stress", "weightKey":"post_stress_reengage", "polarity":1, "level":3 },
+
+  { "id":"pcm_096", "text":"They disengage when personal boundaries feel ignored.", "dimension":"boundaries", "weightKey":"boundary_violation_exit", "polarity":-1, "level":3 },
+  { "id":"pcm_097", "text":"They need clear boundaries to feel emotionally safe.", "dimension":"boundaries", "weightKey":"boundary_safety", "polarity":1, "level":3 },
+  { "id":"pcm_098", "text":"They pull back when emotional roles feel unclear.", "dimension":"boundaries", "weightKey":"role_confusion", "polarity":-1, "level":3 },
+  { "id":"pcm_099", "text":"They re-engage slowly after emotional distance.", "dimension":"boundaries", "weightKey":"slow_reengagement", "polarity":1, "level":3 },
+  { "id":"pcm_100", "text":"They feel safer when boundaries are respected consistently.", "dimension":"boundaries", "weightKey":"boundary_consistency", "polarity":1, "level":3 },
+
+  { "id":"pcm_101", "text":"They monitor changes in effort after disagreements.", "dimension":"boundaries", "weightKey":"effort_monitoring", "polarity":-1, "level":3 },
+  { "id":"pcm_102", "text":"They need reassurance before trusting again after hurt.", "dimension":"boundaries", "weightKey":"trust_reassurance", "polarity":-1, "level":3 },
+  { "id":"pcm_103", "text":"They become cautious once trust is shaken.", "dimension":"boundaries", "weightKey":"trust_caution", "polarity":-1, "level":3 },
+  { "id":"pcm_104", "text":"They feel safer after repair conversations.", "dimension":"boundaries", "weightKey":"repair_safety", "polarity":1, "level":3 },
+  { "id":"pcm_105", "text":"They prefer gradual repair over instant resolution.", "dimension":"boundaries", "weightKey":"gradual_repair", "polarity":1, "level":3 },
+
+  { "id":"pcm_106", "text":"They value emotional honesty over short-term comfort.", "dimension":"values", "weightKey":"honesty_priority", "polarity":1, "level":3 },
+  { "id":"pcm_107", "text":"They feel secure when emotional effort is mutual.", "dimension":"values", "weightKey":"mutual_effort", "polarity":1, "level":3 },
+  { "id":"pcm_108", "text":"They value consistency more than intensity.", "dimension":"values", "weightKey":"consistency_over_intensity", "polarity":1, "level":3 },
+  { "id":"pcm_109", "text":"They disengage when effort feels one-sided for too long.", "dimension":"values", "weightKey":"one_sided_exit", "polarity":-1, "level":3 },
+  { "id":"pcm_110", "text":"They feel safer with predictable emotional behaviour.", "dimension":"values", "weightKey":"predictable_emotions", "polarity":1, "level":3 },
+
+  { "id":"pcm_111", "text":"They hesitate to commit when emotional patterns feel unstable.", "dimension":"values", "weightKey":"commitment_hesitation", "polarity":-1, "level":3 },
+  { "id":"pcm_112", "text":"They commit more once consistency is proven.", "dimension":"values", "weightKey":"commit_after_consistency", "polarity":1, "level":3 },
+  { "id":"pcm_113", "text":"They value calm resolution over dramatic reconciliation.", "dimension":"values", "weightKey":"calm_over_drama", "polarity":1, "level":3 },
+  { "id":"pcm_114", "text":"They feel uneasy when expectations remain unspoken.", "dimension":"values", "weightKey":"unspoken_expectations", "polarity":-1, "level":3 },
+  { "id":"pcm_115", "text":"They relax once emotional balance returns.", "dimension":"values", "weightKey":"balance_relaxation", "polarity":1, "level":3 },
+
+  { "id":"pcm_116", "text":"They disengage when emotional roles are unclear.", "dimension":"values", "weightKey":"role_uncertainty", "polarity":-1, "level":3 },
+  { "id":"pcm_117", "text":"They feel grounded when expectations are explicit.", "dimension":"values", "weightKey":"explicit_expectations", "polarity":1, "level":3 },
+  { "id":"pcm_118", "text":"They need behavioural consistency to feel secure.", "dimension":"values", "weightKey":"behavioural_consistency", "polarity":1, "level":3 },
+  { "id":"pcm_119", "text":"They become cautious when emotional alignment feels off.", "dimension":"values", "weightKey":"alignment_caution", "polarity":-1, "level":3 },
+  { "id":"pcm_120", "text":"They feel settled when emotional patterns stabilise.", "dimension":"values", "weightKey":"pattern_stability", "polarity":1, "level":3 },
+
+  { "id":"pcm_121", "text":"They need time before emotionally re-investing after conflict.", "dimension":"boundaries", "weightKey":"reinvest_delay", "polarity":1, "level":3 },
+  { "id":"pcm_122", "text":"They withdraw when emotional effort feels forced.", "dimension":"boundaries", "weightKey":"forced_effort_exit", "polarity":-1, "level":3 },
+  { "id":"pcm_123", "text":"They feel safer when emotional repair is mutual.", "dimension":"boundaries", "weightKey":"mutual_repair", "polarity":1, "level":3 },
+  { "id":"pcm_124", "text":"They disengage if reassurance is inconsistent.", "dimension":"boundaries", "weightKey":"inconsistent_reassurance", "polarity":-1, "level":3 },
+  { "id":"pcm_125", "text":"They re-engage thoughtfully rather than impulsively.", "dimension":"boundaries", "weightKey":"thoughtful_reengagement", "polarity":1, "level":3 },
+
+  { "id":"pcm_126", "text":"They feel emotionally safer after clear repair conversations.", "dimension":"boundaries", "weightKey":"clear_repair", "polarity":1, "level":3 },
+  { "id":"pcm_127", "text":"They hesitate when emotional signals change suddenly.", "dimension":"boundaries", "weightKey":"sudden_signal_hesitation", "polarity":-1, "level":3 },
+  { "id":"pcm_128", "text":"They need consistent reassurance to stay emotionally open.", "dimension":"boundaries", "weightKey":"ongoing_reassurance", "polarity":-1, "level":3 },
+  { "id":"pcm_129", "text":"They disengage when communication becomes emotionally unsafe.", "dimension":"boundaries", "weightKey":"unsafe_comm_exit", "polarity":-1, "level":3 },
+  { "id":"pcm_130", "text":"They open up gradually once emotional safety is restored.", "dimension":"boundaries", "weightKey":"gradual_openness", "polarity":1, "level":3 },
+
+  { "id":"pcm_131", "text":"They value emotional predictability in daily interactions.", "dimension":"values", "weightKey":"daily_predictability", "polarity":1, "level":3 },
+  { "id":"pcm_132", "text":"They feel unsettled by inconsistent emotional effort.", "dimension":"values", "weightKey":"effort_inconsistency", "polarity":-1, "level":3 },
+  { "id":"pcm_133", "text":"They prioritise emotional safety over excitement.", "dimension":"values", "weightKey":"safety_priority", "polarity":1, "level":3 },
+  { "id":"pcm_134", "text":"They disengage when trust feels fragile.", "dimension":"values", "weightKey":"fragile_trust_exit", "polarity":-1, "level":3 },
+  { "id":"pcm_135", "text":"They feel more committed when emotional effort is steady.", "dimension":"values", "weightKey":"steady_commitment", "polarity":1, "level":3 },
+
+  { "id":"pcm_136", "text":"They need time to emotionally settle after disruptions.", "dimension":"emotions", "weightKey":"emotional_settling", "polarity":1, "level":3 },
+  { "id":"pcm_137", "text":"They become guarded when emotional safety feels threatened.", "dimension":"emotions", "weightKey":"safety_guarding", "polarity":-1, "level":3 },
+  { "id":"pcm_138", "text":"They feel calmer once emotional roles are clarified.", "dimension":"emotions", "weightKey":"role_clarity_relief", "polarity":1, "level":3 },
+  { "id":"pcm_139", "text":"They withdraw when emotional expectations shift suddenly.", "dimension":"emotions", "weightKey":"sudden_expectation_shift", "polarity":-1, "level":3 },
+  { "id":"pcm_140", "text":"They feel secure when emotional balance is maintained over time.", "dimension":"emotions", "weightKey":"long_term_balance", "polarity":1, "level":3 }
+]
+
+</script>
+<script>
+  /* =====================================================
+   IDEAL MATCH — LEVEL CONFIG
+===================================================== */
+
+const IDEAL_LEVELS = [
+  { key: "core", label: "Core Signals", description: "Emotional & relational foundation" },
+  { key: "personality", label: "Personality", description: "Emotional depth & temperament" },
+  { key: "values", label: "Values", description: "Beliefs & life direction" },
+  { key: "lifestyle", label: "Lifestyle", description: "Daily life compatibility" },
+  { key: "attraction", label: "Attraction", description: "Chemistry & desire realism" },
+  { key: "relationship", label: "Relationship Design", description: "Commitment & structure" },
+  { key: "geo", label: "Reality & Location", description: "Where you live vs who you want" },
+  { key: "meta", label: "Self-Awareness", description: "Expectation calibration" },
+];
+</script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
