@@ -1,0 +1,220 @@
+config:
+  target: "https://nkujeixtehrkhqelqbpm.supabase.co"
+  phases:
+    # Phase 1: Simulate Instagram link click → site load (cold start)
+    - duration: 30
+      arrivalRate: 10
+      rampTo: 100
+      name: "Cold start — Instagram link clicks"
+    # Phase 2: Ramp up to 500 users (normal peak)
+    - duration: 60
+      arrivalRate: 100
+      rampTo: 500
+      name: "Ramp to 500 concurrent users"
+    # Phase 3: Hold at 500 (sustained load)
+    - duration: 60
+      arrivalRate: 500
+      name: "Hold at 500 users"
+    # Phase 4: Push to 1000
+    - duration: 60
+      arrivalRate: 500
+      rampTo: 1000
+      name: "Ramp to 1000 concurrent users"
+    # Phase 5: Hold at 1000 (stress test)
+    - duration: 60
+      arrivalRate: 1000
+      name: "Hold at 1000 users"
+    # Phase 6: Push to 1500 (peak stress)
+    - duration: 30
+      arrivalRate: 1000
+      rampTo: 1500
+      name: "Ramp to 1500 users — peak stress"
+    # Phase 7: Hold at 1500
+    - duration: 30
+      arrivalRate: 1500
+      name: "Hold at 1500 users"
+
+  defaults:
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdWplaXh0ZWhya2hxZWxxYnBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1NTgxNjcsImV4cCI6MjA4MDEzNDE2N30.H0soEVjKS8aduXspJqPoQ-LiOX-oLa9Z9aMCpybcqng"
+      apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdWplaXh0ZWhya2hxZWxxYnBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1NTgxNjcsImV4cCI6MjA4MDEzNDE2N30.H0soEVjKS8aduXspJqPoQ-LiOX-oLa9Z9aMCpybcqng"
+  http:
+    timeout: 15
+
+  # Thresholds — test FAILS if these are breached
+  ensure:
+    p95: 2000      # 95% of requests must complete under 2 seconds
+    p99: 5000      # 99% under 5 seconds
+    maxErrorRate: 20  # fail if error rate exceeds 20%
+
+scenarios:
+
+  # ── SOCIAL FEED (most used feature) ──────────────────── weight 14
+  - name: "Social Posts Feed"
+    weight: 14
+    flow:
+      - get:
+          url: "/rest/v1/posts?select=id,content,created_at,post_type,author_id,profiles(username,avatar_url)&order=created_at.desc&limit=20"
+          capture:
+            - json: "$[0].id"
+              as: "first_post_id"
+
+  # ── COUPLES DISCOVER FEED ────────────────────────────── weight 14
+  - name: "Couples Discover Feed"
+    weight: 14
+    flow:
+      - get:
+          url: "/rest/v1/couples?select=id,couple_name,partner_username,couple_type,bond_score,emotional_sync_score,stability_score,growth_index,avatar_url,institution,locality,declared_by,created_at,social_links,backstory&order=bond_score.desc&limit=20"
+          capture:
+            - json: "$[0].id"
+              as: "first_couple_id"
+      # Also load reactions for the couples (as the app does)
+      - get:
+          url: "/rest/v1/reactions?select=target_id,user_id,reaction_type&target_type=eq.couple&limit=100"
+
+  # ── SHIP IT FEED ─────────────────────────────────────── weight 10
+  - name: "Ship It Feed"
+    weight: 10
+    flow:
+      - get:
+          url: "/rest/v1/ship_it?select=*&order=created_at.desc&limit=20"
+          capture:
+            - json: "$[0].id"
+              as: "ship_id"
+      - get:
+          url: "/rest/v1/ship_votes?select=ship_id,vote&limit=100"
+
+  # ── SINGLE COUPLE PROFILE ────────────────────────────── weight 8
+  - name: "Single Couple Profile"
+    weight: 8
+    flow:
+      - get:
+          url: "/rest/v1/couples?select=*&order=bond_score.desc&limit=1"
+          capture:
+            - json: "$[0].id"
+              as: "couple_id"
+      - get:
+          url: "/rest/v1/couple_comments?select=*&couple_id=eq.{{ couple_id }}&target_type=eq.couple&limit=20"
+      - get:
+          url: "/rest/v1/couple_community_photos?select=*&couple_id=eq.{{ couple_id }}&limit=12"
+      - get:
+          url: "/rest/v1/couple_statuses?select=couple_id&couple_id=eq.{{ couple_id }}&expires_at=gt.{{ $timestamp }}"
+
+  # ── LOAD MY PROFILE ──────────────────────────────────── weight 10
+  - name: "Load My Profile"
+    weight: 10
+    flow:
+      - get:
+          url: "/rest/v1/profiles?select=*&limit=1"
+          capture:
+            - json: "$[0].id"
+              as: "profile_id"
+      - get:
+          url: "/rest/v1/follows?select=*&follower=eq.{{ profile_id }}&limit=50"
+      - get:
+          url: "/rest/v1/notifications?select=*&user_id=eq.{{ profile_id }}&order=created_at.desc&limit=20"
+
+  # ── SEARCH USERS ─────────────────────────────────────── weight 8
+  - name: "Search Users"
+    weight: 8
+    flow:
+      - get:
+          url: "/rest/v1/profiles?select=id,username,avatar_url&username=ilike.*bond*&limit=6"
+      - get:
+          url: "/rest/v1/profiles?select=id,username,avatar_url&username=ilike.*a*&limit=6"
+
+  # ── REACTIONS ON POSTS ───────────────────────────────── weight 6
+  - name: "Reactions on Posts"
+    weight: 6
+    flow:
+      - get:
+          url: "/rest/v1/reactions?select=target_id,user_id,reaction_type&target_type=eq.post&limit=50"
+
+  # ── ADD REACTION (write) ─────────────────────────────── weight 5
+  - name: "Add Reaction"
+    weight: 5
+    flow:
+      - get:
+          url: "/rest/v1/couples?select=id&order=bond_score.desc&limit=1"
+          capture:
+            - json: "$[0].id"
+              as: "couple_id"
+      - post:
+          url: "/rest/v1/reactions"
+          json:
+            target_type: "couple"
+            target_id: "{{ couple_id }}"
+            reaction_type: "❤️"
+
+  # ── COUPLE COMMENTS ──────────────────────────────────── weight 6
+  - name: "Couple Comments"
+    weight: 6
+    flow:
+      - get:
+          url: "/rest/v1/couple_comments?select=*&target_type=eq.couple&order=created_at.desc&limit=20"
+
+  # ── POST A COMMENT (write) ───────────────────────────── weight 4
+  - name: "Post Comment"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/couples?select=id&order=bond_score.desc&limit=1"
+          capture:
+            - json: "$[0].id"
+              as: "couple_id"
+      - post:
+          url: "/rest/v1/couple_comments"
+          json:
+            couple_id: "{{ couple_id }}"
+            target_type: "couple"
+            content: "This is a test comment from load test"
+            username: "loadtest_user"
+
+  # ── CAST SHIP VOTE (write) ───────────────────────────── weight 5
+  - name: "Cast Ship Vote"
+    weight: 5
+    flow:
+      - get:
+          url: "/rest/v1/ship_it?select=id&order=created_at.desc&limit=1"
+          capture:
+            - json: "$[0].id"
+              as: "ship_id"
+      - post:
+          url: "/rest/v1/ship_votes"
+          json:
+            ship_id: "{{ ship_id }}"
+            user_id: "00000000-0000-0000-0000-000000000001"
+            vote: "sail"
+
+  # ── COUPLE STATUSES ──────────────────────────────────── weight 4
+  - name: "Couple Statuses"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/couple_statuses?select=*&order=created_at.desc&limit=20"
+
+  # ── COUPLE COMMUNITY PHOTOS ──────────────────────────── weight 4
+  - name: "Couple Community Photos"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/couple_community_photos?select=*&order=created_at.desc&limit=20"
+
+  # ── LEADERBOARD ──────────────────────────────────────── weight 4
+  - name: "Leaderboard"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/couples?select=id,couple_name,bond_score,global_rank,institution,locality&order=bond_score.desc&limit=50"
+      - get:
+          url: "/rest/v1/profiles?select=id,username,rank_score,global_rank&order=rank_score.desc&limit=50"
+
+  # ── CHALLENGES FEED ──────────────────────────────────── weight 4
+  - name: "Challenges Feed"
+    weight: 4
+    flow:
+      - get:
+          url: "/rest/v1/challenges?select=*&limit=20"
+      - get:
+          url: "/rest/v1/couple_challenges?select=*&order=completed_at.desc&limit=20"
