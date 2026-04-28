@@ -5,48 +5,30 @@ import './bond-styles.css';
 import * as Sentry from "@sentry/react";
 
 // ── Instagram WebView Fix ──
+// ── Instagram WebView Fix ──
 (function redirectInstagramWebView() {
-  const isInstagram = /Instagram/.test(navigator.userAgent);
-  const isAndroid = /Android/.test(navigator.userAgent);
-  const isIOS = /iPhone|iPad/.test(navigator.userAgent);
+  const ua = navigator.userAgent;
+  if (!/Instagram/.test(ua)) return;
 
-  // Android — force open in Chrome
-  if (isInstagram && isAndroid) {
+  const isAndroid = /Android/.test(ua);
+  const isIOS = /iPhone|iPad/.test(ua);
+
+  // ✅ Android — silently opens Chrome
+  if (isAndroid) {
     const url = window.location.href;
     window.location.href =
       "intent://" +
       url.replace(/https?:\/\//, "") +
       "#Intent;scheme=https;package=com.android.chrome;end";
-    return; // ← stop here, don't run iOS code
+    return;
   }
 
-  // iOS — can't force redirect, show a banner instead
-  if (isInstagram && isIOS) {
-    const banner = document.createElement("div");
-    banner.innerHTML = `
-      <div style="
-        position:fixed; top:0; left:0; right:0; z-index:99999;
-        background:#1a1a2e; color:white;
-        padding:14px 16px; font-family:sans-serif;
-        display:flex; align-items:center; justify-content:space-between;
-        border-bottom: 1px solid rgba(255,255,255,0.1);
-      ">
-        <span style="font-size:13px; line-height:1.4">
-          📲 For the best experience,<br/>
-          tap <b>···</b> then <b>Open in Safari</b>
-        </span>
-        <button onclick="this.parentElement.parentElement.remove()" style="
-          background:transparent;
-          border:1px solid rgba(255,255,255,0.3);
-          color:white; border-radius:20px;
-          padding:6px 12px; font-size:12px; cursor:pointer;
-        ">Got it</button>
-      </div>
-    `;
-    document.body.prepend(banner);
+  // ✅ iOS — just load the app, hide OAuth buttons
+  if (isIOS) {
+    window.__IS_INSTAGRAM_IOS__ = true;
+    return; // ← let the app load normally, no redirect, no page replacement
   }
 })();
-
 // ── Sentry ──
 Sentry.init({
   dsn: "https://89c23362f4753d7f7d7688f8c6e60488@o4510980003332096.ingest.us.sentry.io/4510980007723008",
@@ -132,6 +114,212 @@ console.warn("[Storage] upload crashed:", err);
 return null;
 }
 }
+// ── PROFILE + REVIEW DB HELPERS ──
+async function getOrCreateUser() {
+  try {
+    const { data: { user } } = await window.supabaseClient.auth.getUser();
+
+    if (user) return user.id;
+
+    let guestId = localStorage.getItem("bond_guest_uuid");
+
+    if (!guestId) {
+      guestId = crypto.randomUUID();
+      localStorage.setItem("bond_guest_uuid", guestId);
+
+      const { error } = await window.supabaseClient
+        .from("profiles")
+        .insert({
+          id: guestId,
+          username: "guest_" + guestId.slice(0, 6),
+          display_name: "Guest",
+        });
+
+      if (error) {
+        console.error("Guest profile insert failed:", error);
+      }
+    }
+
+    return guestId;
+  } catch (e) {
+    console.error("getOrCreateUser error:", e);
+    return ensureGuestUUID(); // fallback
+  }
+}
+/**
+ * Single source of truth for guest UUID.
+ * Call this anywhere you need a user ID and auth might not exist.
+ */
+function ensureGuestUUID() {
+  let uid = localStorage.getItem("bond_guest_uuid");
+
+  if (!uid) {
+    uid = crypto.randomUUID();
+    localStorage.setItem("bond_guest_uuid", uid);
+  }
+
+  return uid;
+}
+async function saveProfileToDB(profile) {
+  try {
+    const userId = await getOrCreateUser();
+
+    const payload = {
+      id: userId,
+      username: profile.username,
+      display_name: profile.display_name,
+      updated_at: new Date().toISOString()
+    };
+
+    console.log("[PROFILE SAVING]", payload);
+
+    const { error } = await window.supabaseClient
+      .from("profiles")
+      .upsert(payload, { onConflict: "id" });
+
+    if (error) throw error;
+
+    console.log("[PROFILE SAVED SUCCESS]");
+    return true;
+
+  } catch (err) {
+    console.error("Profile save error:", err);
+    return false;
+  }
+}
+async function submitCharacterReview({
+  target_user_id,
+  target_username, // keep for now
+  answers,
+  archetype,
+  animal,
+  green_flags,
+  red_flags,
+  quote_line,
+  secret_line,
+  is_anonymous = true
+}) {
+  try {
+    const userId = await getOrCreateUser();
+
+    const { error } = await window.supabaseClient
+      .from("character_reviews")
+      .insert({
+        target_user_id,
+        target_username, // fallback
+        reviewer_user_id: userId,
+        is_anonymous,
+        answers,
+        archetype,
+        animal,
+        green_flags,
+        red_flags,
+        quote_line,
+        secret_line
+      });
+
+    if (error) throw error;
+
+    return true;
+  } catch (err) {
+    console.error("Review submit error:", err);
+    return false;
+  }
+}
+async function updateProfileMetrics(username) {
+  try {
+    // First resolve the user id from username
+    const { data: profileData } = await window.supabaseClient
+      .from("profiles")
+      .select("id")
+      .eq("username", username)
+      .maybeSingle();
+
+    const resolvedUserId = profileData?.id;
+
+    let orFilter = `target_username.eq.${username}`;
+    if (resolvedUserId) {
+      orFilter = `target_user_id.eq.${resolvedUserId},target_username.eq.${username}`;
+    }
+
+    const { data, error } = await window.supabaseClient
+      .from("character_reviews")
+      .select("answers")
+      .or(orFilter);
+
+    if (error || !data || !data.length) return;
+
+    const count = data.length;
+
+    const KEYS = {
+      vibe:      5,
+      real:      5,
+      reliable:  7,
+      emotional: 5,
+      fun:       5,
+    };
+
+    let totalNorm = 0;
+    let samples   = 0;
+
+    data.forEach(r => {
+      const ans = r.answers || {};
+      Object.entries(KEYS).forEach(([k, max]) => {
+        const val = Number(ans[k] || 0);
+        if (val > 0) {
+          totalNorm += (val / max) * 5;
+          samples++;
+        }
+      });
+    });
+
+    const avg = samples > 0
+      ? parseFloat((totalNorm / samples).toFixed(2))
+      : 0;
+
+    await window.supabaseClient
+      .from("profiles")
+      .update({ reviews_count: count, avg_rating: avg })
+      .eq("username", username);
+
+  } catch (e) {
+    console.warn("[updateProfileMetrics] failed:", e);
+  }
+}
+async function getProfile(username) {
+  const { data, error } = await window.supabaseClient
+    .from("profiles")
+    .select(`
+      username,
+      display_name,
+      bio,
+      college,
+      city,
+      reviews_count,
+      avg_rating,
+      self_archetype,
+      self_animal,
+      one_word
+    `)
+    .eq("username", username)
+    .single();
+
+  if (error) throw error;
+
+  return data;
+}
+
+async function getCharacterReviews(username) {
+  const { data, error } = await window.supabaseClient
+    .from("character_reviews")
+    .select("*")
+    .eq("target_username", username)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  return data;
+}
 
 // ── Compress image before upload (halves file size) ──
 function compressImage(file, maxWidth = 400, quality = 0.75) {
@@ -212,7 +400,7 @@ return (
 </div>
 
 {/* CONTENT */}
-<div className="flex-1 max-w-md mx-auto w-full px-4 py-6">
+<div className="flex-1 min-h-0 max-w-md mx-auto w-full px-4 py-6 overflow-y-auto custom-scroll">
   {children}
 </div>
 </div>
@@ -229,16 +417,16 @@ return (
 
   {/* LEFT: STREAK + STATUS */}
   <div className="flex items-center gap-3">
-    <div
-      className="
-        relative w-10 h-10 rounded-full
-        flex items-center justify-center
-        text-pink-400 text-sm font-medium
-        border border-pink-500/40
-        shadow-[0_0_16px_rgba(236,72,153,0.55)]
-        animate-pulseSlow
-      "
-    >
+  <div
+ className="
+ relative w-10 h-10 rounded-full
+ flex items-center justify-center
+ text-blue-400 text-sm font-medium
+ border border-blue-400/30
+ shadow-sm
+ animate-pulseSlow
+ "
+>
       1d
     </div>
 
@@ -257,15 +445,12 @@ openCoachFromReact(
 className="
 px-3 py-1 rounded-full
 text-xs font-medium
-text-sky-400
-bg-sky-500/15
-border border-sky-400/30
-
-shadow-[0_0_14px_rgba(56,189,248,0.45)]
-hover:shadow-[0_0_22px_rgba(56,189,248,0.75)]
-hover:bg-sky-500/25
-
-transition-all duration-300
+text-blue-600
+bg-blue-50
+border border-gray-200
+shadow-sm
+hover:bg-blue-100
+transition
 "
 >
 Ask Coach
@@ -275,7 +460,7 @@ Ask Coach
 </div>
 
 {/* SOFT GLOW UNDERLINE */}
-<div className="h-[1px] bg-gradient-to-r from-transparent via-pink-500/40 to-transparent" />
+<div className="h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
 </div>
 );
 };
@@ -324,7 +509,7 @@ className={`
   )}
 </div>
 
-<div className="self-end text-xs text-pink-400">
+<div className="self-end text-xs text-blue-400">
   {cta}
 </div>
 </button>
@@ -396,7 +581,7 @@ Level {level}
 </div>
 </div> 
 
-<div className="self-end text-xs text-pink-400">
+<div className="self-end text-xs text-text-blue-500-400">
   Start →
 </div>
 </button>
@@ -414,38 +599,37 @@ const ARCHETYPES = [
     name: "Secure Team",
     description:
       "You repair, you joke, you plan. Not perfect, but there’s a felt sense of ‘we’re on the same side’.",
-    color: "bg-gradient-to-br from-emerald-500/20 to-cyan-500/10",
+    color: "bg-green-500/10 border border-green-500/20",
   },
   {
     id: "growing-bond",
     name: "Growing Bond",
     description:
       "There’s real warmth here and a lot that works. Some patterns still need deliberate attention.",
-    color: "bg-gradient-to-br from-sky-500/20 to-indigo-500/10",
+    color: "bg-blue-500/10 border border-blue-500/20",
   },
   {
     id: "fragile-chemistry",
     name: "Fragile Chemistry",
     description:
       "The pull is strong, but so are the wobbles. Things easily tip from amazing to confusing.",
-    color: "bg-gradient-to-br from-amber-500/20 to-rose-500/10",
+    color: "bg-amber-500/10 border border-amber-500/20",
   },
   {
     id: "situationship-loop",
     name: "Situationship Loop",
     description:
       "More ambiguity than clarity. High highs, low lows, lots of ‘what are we even doing’.",
-    color: "bg-gradient-to-br from-rose-500/20 to-red-500/10",
+    color: "bg-red-500/10 border border-red-500/20",
   },
   {
     id: "unclear-data",
     name: "Unclear / Heavy Zone",
     description:
       "The data is thin or intense but lopsided. Your body might be saying ‘slow down and observe’.",
-    color: "bg-gradient-to-br from-slate-500/20 to-slate-700/10",
+    color: "bg-gray-500/10 border border-gray-500/20",
   },
 ];
-
 /* -------------------------------------------------------
    QUIZ LEVELS (couple assessments)
 -------------------------------------------------------- */
@@ -771,7 +955,24 @@ let isCoachMaximized = false;
 window.addEventListener("keydown", (e) => {
 if (e.key === "Escape" && isCoachMaximized) {
 toggleCoachMaximize("escape_key");
+let coachMaximizedAt = null;
+
+function getActiveScreen() {
+  try {
+    // Try to determine current screen from URL or app state
+    const path = window.location.pathname;
+    if (path.includes("/people/")) return "people_profile";
+    return "home";
+  } catch { return "unknown"; }
 }
+
+function getSessionId() {
+  try {
+    return localStorage.getItem("bond_anon_id") || "no_session";
+  } catch { return "no_session"; }
+}
+}
+
 });
 
 function toggleCoachMaximize(source = "manual") {
@@ -1981,7 +2182,34 @@ return (
       return null;
   }
 };
-
+const LetterAvatar = ({ name, size = 44, fontSize = 17, radius = "50%" }) => {
+  const letter = (name || "?")[0].toUpperCase();
+  const gradients = [
+    "linear-gradient(135deg,#f87171,#fb923c)",
+    "linear-gradient(135deg,#818cf8,#6366f1)",
+    "linear-gradient(135deg,#34d399,#10b981)",
+    "linear-gradient(135deg,#fbbf24,#f59e0b)",
+    "linear-gradient(135deg,#f9a8d4,#f472b6)",
+  ];
+  const grad = gradients[letter.charCodeAt(0) % gradients.length];
+  return (
+    <div style={{
+      width: size,
+      height: size,
+      borderRadius: radius,
+      background: grad,
+      flexShrink: 0,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontWeight: 800,
+      fontSize,
+      color: "#fff",
+    }}>
+      {letter}
+    </div>
+  );
+};
 const Button = ({
   children,
   primary = false,
@@ -1992,9 +2220,9 @@ const Button = ({
   const base =
     "inline-flex items-center justify-center px-3 py-2 rounded-xl text-xs font-semibold hover-pulse focus:outline-none focus:ring-2 focus:ring-offset-0 focus:ring-bondAccent/60 disabled:opacity-50 disabled:cursor-not-allowed";
   const primaryClasses =
-    "bg-gradient-to-r from-rose-500 via-rose-400 to-amber-400 text-bondBg shadow-md hover:shadow-xl";
+    "bg-blue-600 text-white shadow-sm hover:bg-blue-700 text-bondBg shadow-md hover:shadow-xl";
   const secondaryClasses =
-    "bg-bondSurfaceSoft text-bondText border border-bondBorder hover:border-bondAccent/50";
+    "bg-bondSurfaceSoft text-bondText border border-bondBorder hover:border-blue-400/40";
   const finalClass =
     base + " " + (primary ? primaryClasses : secondaryClasses) + " " + className;
   return (
@@ -2008,7 +2236,7 @@ const Button = ({
 const Spinner = ({ className = "" }) => (
   <div
     className={
-      "w-6 h-6 border-2 border-bondAccent/20 border-t-bondAccent rounded-full animate-spin " +
+      "w-6 h-6 border-2 border-blue-500/20 border-t-blue-500 rounded-full animate-spin " +
       className
     }
   />
@@ -2029,7 +2257,7 @@ const AnswerScale = ({ onChange }) => {
             <button
               key={val}
               onClick={() => onChange && onChange(val)}
-              className="text-[10px] py-2 rounded-xl border border-bondBorder bg-bondSurfaceSoft hover:bg-gradient-to-b hover:from-rose-500/20 hover:to-rose-500/5 hover:border-rose-400/70 transition-all card-hover"
+              className="text-[10px] py-2 rounded-xl border border-bondBorder bg-bondSurfaceSoft hover:bg-blue-500/10 hover:border-blue-400/40 transition-all card-hover"
             >
               {val}
               <div className="mt-0.5 text-[9px] opacity-70">{label}</div>
@@ -2227,8 +2455,7 @@ return /^[A-Za-z .'-]+$/.test(trimmed);
 };
 
 const canSave = validateName(partners[0]);
-
-const submit = () => {
+const submit = async () => {
   if (!canSave) {
     setError("Use at least 2 letters for your name.");
     return;
@@ -2236,6 +2463,19 @@ const submit = () => {
 
   const cleaned = partners.map((p) => p.trim()).filter(Boolean);
   const [p1Name, maybeP2, ...extra] = cleaned;
+
+  const username = p1Name.toLowerCase().replace(/\s+/g, "");
+
+  const success = await saveProfileToDB({
+    username,
+    display_name: p1Name,
+  });
+
+  if (!success) {
+    console.error("Profile save failed");
+    setError("Could not save your profile. Please try again.");
+    return;
+  }
 
   saveGuestProfile(p1Name);
 
@@ -2246,11 +2486,6 @@ const submit = () => {
     quizState: "menu",
   });
 };
-return (
-<div className="h-screen flex flex-col bg-bondBg text-bondText px-8 py-10 max-w-md mx-auto overflow-hidden relative">
-<div className="absolute inset-0 pointer-events-none opacity-30">
-  <div className="gradient-ring gradient-ring-3" />
-</div>
 
 <div className="mb-8 relative z-10">
   <h1 className="text-3xl font-extrabold tracking-tight">
@@ -2766,6 +3001,19 @@ return (
 </div>
 );
 };
+function calculateIdealMatchScore(answers) {
+  // Accepts either an array [1,2,5,3...] or an object { q1: 3, q2: 5 ... }
+  let vals = [];
+  if (Array.isArray(answers)) {
+    vals = answers.filter(v => typeof v === "number" && v > 0);
+  } else if (answers && typeof answers === "object") {
+    vals = Object.values(answers).filter(v => typeof v === "number" && v > 0);
+  }
+  if (vals.length === 0) return null;
+  const total = vals.reduce((s, v) => s + v, 0);
+  const max = vals.length * 5;
+  return Math.round((total / max) * 100);
+}
 function computeIdealResult(answers) {
 // 🔒 HARD GUARD — prevents this crash forever
 if (!Array.isArray(answers)) {
@@ -2978,7 +3226,81 @@ What should I optimize — expectations, environment, or behavior?`
 
 return null;
 };
+const FeedHub = ({ data, save, setActiveProfile, setScreen }) => {
+  const [feedProfiles, setFeedProfiles] = useState([]);
+  const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    const fetchFeed = async () => {
+      try {
+        setLoading(true);
+
+        const { data, error } = await window.supabaseClient
+          .from("profiles")
+          .select("id, username, bio, reviews_count")
+          .eq("is_public", true)
+          .order("reviews_count", { ascending: false })
+          .limit(20);
+
+        if (error) throw error;
+
+        setFeedProfiles(data || []);
+      } catch (err) {
+        console.error("Feed error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchFeed();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center mt-10">
+        <Spinner />
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full min-h-0 flex flex-col">
+      <h2 className="text-xl font-semibold mb-4">People</h2>
+
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pb-24">
+        {feedProfiles.map((p) => (
+          <div
+            key={p.id}
+            onClick={() => {
+              setActiveProfile?.(p);
+              setScreen?.("profile");
+            }}
+            className="bg-bondSurface border border-bondBorder rounded-2xl p-4 cursor-pointer hover:border-blue-400/40 transition"
+          >
+            <div className="flex items-center gap-3">
+              <LetterAvatar
+  name={p.username}
+  size={40}
+  fontSize={15}
+  radius="50%"
+/>
+              <div>
+                <div className="font-medium">{p.username}</div>
+                <div className="text-xs opacity-60">
+                  {p.reviews_count || 0} reviews
+                </div>
+              </div>
+            </div>
+
+            {p.bio && (
+              <p className="text-sm opacity-70 mt-2">{p.bio}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 /* -------------------------------------------------------
 PROFILE RADAR – SCAN & SCORE REAL PEOPLE
 -------------------------------------------------------- */
@@ -3169,6 +3491,7 @@ return (
 </div>
 );
 };
+
 /* -------------------------------------------------------
 COUPLE QUIZ – QUESTION DECORATION HELPERS
 -------------------------------------------------------- */
@@ -3706,7 +4029,7 @@ return (
 /* -------------------------------------------------------
 TEST HUB – MAIN ASSESSMENT MENU (COUPLE + SOLO TOOLS)
 -------------------------------------------------------- */
-const TestHub = ({ data, save }) => {
+const TestHub = ({ data, save, setActiveProfile, setScreen }) => {
 
 /* =====================================================
 SESSION STARTERS (LEVEL-AWARE)
@@ -3780,9 +4103,20 @@ save={save}
 );
 }
 
-
 if (data.quizState === "radar") {
 return <ProfileRadarHub data={data} save={save} />;
+}
+if (data.quizState === "feed") {
+  return (
+    <AppShell data={data} save={save}>
+      <FeedHub
+        data={data}
+        save={save}
+        setActiveProfile={setActiveProfile}
+        setScreen={setScreen}
+      />
+    </AppShell>
+  );
 }
 /* =====================================================
 COUPLE QUIZ — RESULTS
@@ -3946,6 +4280,12 @@ onClick={() => save({ quizState: "solo_level_select" })}
     cta="›"
     onClick={() => save({ quizState: "radar" })}
   />
+
+<FeatureCard
+  title="People"
+  subtitle="See top profiles ranked by reviews"
+  onClick={() => save({ quizState: "feed" })}
+/>
 </div>
 </AppShell>
 );
@@ -4340,6 +4680,7 @@ return (
 </div>
 );
 };
+
 /* -------------------------------------------------------
 DYNAMIC ROADMAP GENERATOR — INTENT → ACTIONS
 (kept here above the component so it's always in scope)
@@ -4946,7 +5287,7 @@ const VerseCard = ({ icon, title, label, summary, detail, onAsk, onClick }) => {
   return (
     <div
       onClick={onClick}
-      className="relative bg-bondSurface rounded-2xl border border-bondBorder p-4 mb-3 cursor-pointer group transition-all duration-200 hover:border-bondAccent/60 hover:shadow-[0_0_25px_rgba(255,184,85,0.25)]"
+      className="relative bg-bondSurface rounded-2xl border border-bondBorder p-4 mb-3 cursor-pointer group transition-all duration-200 hover:border-bondAccent/60 hover:shadow-sm_25px_rgba(255,184,85,0.25)]"
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center">
@@ -5182,12 +5523,12 @@ return (
         border border-bondBorder
         transition-all duration-300
         hover:scale-[1.015]
-        hover:shadow-[0_0_22px_rgba(255,105,180,0.12)]
+        hover:shadow-sm_22px_rgba(255,105,180,0.12)]
       "
     >
       <h3 className="font-semibold mb-1">{c.title}</h3>
       <p className="text-xs text-bondMuted mb-3">{c.summary}</p>
-      <Button onClick={() => openCoachWithPrompt(c.ask)}>Ask AI</Button>
+      <Button onClick={() => openCoachFromReact(c.ask)}>Ask AI</Button>
     </div>
   ))}
 
@@ -5198,7 +5539,7 @@ return (
       border-2 border-bondAccent/30
       transition-all duration-300
       hover:scale-[1.02]
-      hover:shadow-[0_0_28px_rgba(255,105,180,0.18)]
+      hover:shadow-sm_28px_rgba(255,105,180,0.18)]
     "
   >
     <h3 className="font-semibold mb-1">Partner Clone</h3>
@@ -5208,7 +5549,7 @@ return (
     <Button
       primary
       className="
-        w-full bg-gradient-to-r from-pink-500 via-rose-500 to-amber-400
+        w-full bg-gradient-to-r from-text-blue-500-500 via-rose-500 to-amber-400
         transition-all duration-300
         hover:scale-[1.03]
       "
@@ -5243,7 +5584,7 @@ return (
       </p>
       <Button
         primary
-        className="bg-gradient-to-r from-pink-500 to-amber-400"
+        className="bg-gradient-to-r from-text-blue-500-500 to-amber-400"
         onClick={startClone}
       >
         Start
@@ -5392,8 +5733,504 @@ return (
 
 return null;
 };
+// ============================================================
+// COMPLETE REPLACEMENT for the broken getGeneratedProfiles stub
+// FIND in your file:  function getGeneratedProfiles({ page = 0, pageSize = 20, query = "",
+//                     coupleTypeFilter = "all" }) {
+//                       const dummy = Array.from...
+// REPLACE EVERYTHING from that line until the closing }
+// with ALL of this code block
+// ============================================================
 
+// ── SEEDED PRNG (deterministic — same seed = same result always) ──
+function seededRng(seed) {
+  let s = (seed ^ 0xdeadbeef) >>> 0;
+  return function () {
+    s = Math.imul(s ^ (s >>> 16), 0x45d9f3b) >>> 0;
+    s = Math.imul(s ^ (s >>> 16), 0x45d9f3b) >>> 0;
+    s ^= s >>> 16;
+    return (s >>> 0) / 4294967296;
+  };
+}
 
+// ── INSTITUTION DATABASE (searchable by name/city/state/keywords/nicknames) ──
+const _INST_DB = [
+  // IITs
+  { id:"iitb",   n:"IIT Bombay",              c:"Mumbai",          s:"Maharashtra",     t:"Engineering", tags:["iit","iitb","powai","technical","jee"] },
+  { id:"iitd",   n:"IIT Delhi",               c:"New Delhi",       s:"Delhi",           t:"Engineering", tags:["iit","iitd","hauz khas","technical","jee"] },
+  { id:"iitm",   n:"IIT Madras",              c:"Chennai",         s:"Tamil Nadu",      t:"Engineering", tags:["iit","iitm","technical","jee","adyar"] },
+  { id:"iitk",   n:"IIT Kanpur",              c:"Kanpur",          s:"Uttar Pradesh",   t:"Engineering", tags:["iit","iitk","technical","jee"] },
+  { id:"iitr",   n:"IIT Roorkee",             c:"Roorkee",         s:"Uttarakhand",     t:"Engineering", tags:["iit","iitr","technical","jee"] },
+  { id:"iitkgp", n:"IIT Kharagpur",           c:"Kharagpur",       s:"West Bengal",     t:"Engineering", tags:["iit","iitkgp","kgp","technical","jee"] },
+  { id:"iitg",   n:"IIT Guwahati",            c:"Guwahati",        s:"Assam",           t:"Engineering", tags:["iit","iitg","northeast","technical"] },
+  { id:"iith",   n:"IIT Hyderabad",           c:"Hyderabad",       s:"Telangana",       t:"Engineering", tags:["iit","iith","technical","jee"] },
+  { id:"iitbhu", n:"IIT BHU Varanasi",        c:"Varanasi",        s:"Uttar Pradesh",   t:"Engineering", tags:["iit","bhu","varanasi","technical"] },
+  { id:"iiti",   n:"IIT Indore",              c:"Indore",          s:"Madhya Pradesh",  t:"Engineering", tags:["iit","iiti","technical","jee"] },
+  { id:"iitj",   n:"IIT Jodhpur",             c:"Jodhpur",         s:"Rajasthan",       t:"Engineering", tags:["iit","iitj","technical","jee"] },
+  { id:"iitp",   n:"IIT Patna",               c:"Patna",           s:"Bihar",           t:"Engineering", tags:["iit","iitp","technical","jee"] },
+  { id:"iitrpr", n:"IIT Ropar",               c:"Ropar",           s:"Punjab",          t:"Engineering", tags:["iit","ropar","technical"] },
+  { id:"iittt",  n:"IIT Tirupati",            c:"Tirupati",        s:"Andhra Pradesh",  t:"Engineering", tags:["iit","tirupati","technical"] },
+  { id:"iitpkd", n:"IIT Palakkad",            c:"Palakkad",        s:"Kerala",          t:"Engineering", tags:["iit","palakkad","kerala","technical"] },
+  { id:"iitgoa", n:"IIT Goa",                 c:"Panaji",          s:"Goa",             t:"Engineering", tags:["iit","goa","technical"] },
+  { id:"iitjmu", n:"IIT Jammu",               c:"Jammu",           s:"J&K",             t:"Engineering", tags:["iit","jammu","technical"] },
+  { id:"ism",    n:"IIT ISM Dhanbad",         c:"Dhanbad",         s:"Jharkhand",       t:"Engineering", tags:["iit","ism","dhanbad","mining"] },
+  { id:"iitmdi", n:"IIT Mandi",               c:"Mandi",           s:"Himachal Pradesh",t:"Engineering", tags:["iit","mandi","himachal","technical"] },
+  { id:"iitbhl", n:"IIT Bhilai",              c:"Bhilai",          s:"Chhattisgarh",    t:"Engineering", tags:["iit","bhilai","technical"] },
+  // IIMs
+  { id:"iima",   n:"IIM Ahmedabad",           c:"Ahmedabad",       s:"Gujarat",         t:"Management",  tags:["iim","iima","mba","cat","management"] },
+  { id:"iimb",   n:"IIM Bangalore",           c:"Bangalore",       s:"Karnataka",       t:"Management",  tags:["iim","iimb","mba","cat","management","bengaluru"] },
+  { id:"iimc",   n:"IIM Calcutta",            c:"Kolkata",         s:"West Bengal",     t:"Management",  tags:["iim","iimc","mba","cat","management","calcutta"] },
+  { id:"iimk",   n:"IIM Kozhikode",           c:"Kozhikode",       s:"Kerala",          t:"Management",  tags:["iim","iimk","mba","management","kerala"] },
+  { id:"iiml",   n:"IIM Lucknow",             c:"Lucknow",         s:"Uttar Pradesh",   t:"Management",  tags:["iim","iiml","mba","management"] },
+  { id:"iimidr", n:"IIM Indore",              c:"Indore",          s:"Madhya Pradesh",  t:"Management",  tags:["iim","indore","mba","management"] },
+  { id:"iimrpr", n:"IIM Raipur",              c:"Raipur",          s:"Chhattisgarh",    t:"Management",  tags:["iim","raipur","mba"] },
+  { id:"iimrnc", n:"IIM Ranchi",              c:"Ranchi",          s:"Jharkhand",       t:"Management",  tags:["iim","ranchi","mba"] },
+  { id:"iimudr", n:"IIM Udaipur",             c:"Udaipur",         s:"Rajasthan",       t:"Management",  tags:["iim","udaipur","mba"] },
+  { id:"iimshl", n:"IIM Shillong",            c:"Shillong",        s:"Meghalaya",       t:"Management",  tags:["iim","shillong","northeast","mba"] },
+  { id:"iimngp", n:"IIM Nagpur",              c:"Nagpur",          s:"Maharashtra",     t:"Management",  tags:["iim","nagpur","mba"] },
+  { id:"iimbdg", n:"IIM Bodh Gaya",           c:"Bodh Gaya",       s:"Bihar",           t:"Management",  tags:["iim","bodh gaya","mba","bihar"] },
+  // NITs
+  { id:"nitw",   n:"NIT Warangal",            c:"Warangal",        s:"Telangana",       t:"Engineering", tags:["nit","nitw","warangal","technical"] },
+  { id:"nitt",   n:"NIT Trichy",              c:"Trichy",          s:"Tamil Nadu",      t:"Engineering", tags:["nit","nitt","trichy","tiruchirappalli","technical"] },
+  { id:"nitk",   n:"NIT Surathkal",           c:"Mangalore",       s:"Karnataka",       t:"Engineering", tags:["nit","nitk","surathkal","mangalore","technical"] },
+  { id:"nitr",   n:"NIT Rourkela",            c:"Rourkela",        s:"Odisha",          t:"Engineering", tags:["nit","nitr","rourkela","odisha","technical"] },
+  { id:"nitc",   n:"NIT Calicut",             c:"Kozhikode",       s:"Kerala",          t:"Engineering", tags:["nit","nitc","calicut","kozhikode","kerala","technical"] },
+  { id:"mnit",   n:"MNIT Jaipur",             c:"Jaipur",          s:"Rajasthan",       t:"Engineering", tags:["nit","mnit","jaipur","technical"] },
+  { id:"nitdgp", n:"NIT Durgapur",            c:"Durgapur",        s:"West Bengal",     t:"Engineering", tags:["nit","durgapur","bengal","technical"] },
+  { id:"nits",   n:"NIT Silchar",             c:"Silchar",         s:"Assam",           t:"Engineering", tags:["nit","silchar","assam","northeast","technical"] },
+  { id:"nita",   n:"NIT Agartala",            c:"Agartala",        s:"Tripura",         t:"Engineering", tags:["nit","agartala","tripura","northeast"] },
+  { id:"nitp",   n:"NIT Patna",               c:"Patna",           s:"Bihar",           t:"Engineering", tags:["nit","patna","bihar","technical"] },
+  { id:"nith",   n:"NIT Hamirpur",            c:"Hamirpur",        s:"Himachal Pradesh",t:"Engineering", tags:["nit","hamirpur","himachal","technical"] },
+  { id:"nitjsr", n:"NIT Jamshedpur",          c:"Jamshedpur",      s:"Jharkhand",       t:"Engineering", tags:["nit","jamshedpur","jharkhand","technical"] },
+  // BITS
+  { id:"bitsp",  n:"BITS Pilani",             c:"Pilani",          s:"Rajasthan",       t:"Engineering", tags:["bits","pilani","technical","jee"] },
+  { id:"bitsg",  n:"BITS Pilani Goa",         c:"Goa",             s:"Goa",             t:"Engineering", tags:["bits","goa","technical"] },
+  { id:"bitsh",  n:"BITS Pilani Hyderabad",   c:"Hyderabad",       s:"Telangana",       t:"Engineering", tags:["bits","hyderabad","technical"] },
+  // IIITs
+  { id:"iiith",  n:"IIIT Hyderabad",          c:"Hyderabad",       s:"Telangana",       t:"Engineering", tags:["iiit","hyderabad","technical","coding"] },
+  // Delhi NCR
+  { id:"dtu",    n:"DTU Delhi",               c:"New Delhi",       s:"Delhi",           t:"Engineering", tags:["dtu","delhi","technical","ncr"] },
+  { id:"nsut",   n:"NSUT Delhi",              c:"New Delhi",       s:"Delhi",           t:"Engineering", tags:["nsut","delhi","technical","ncr"] },
+  { id:"igdtuw", n:"IGDTUW Delhi",            c:"New Delhi",       s:"Delhi",           t:"Engineering", tags:["igdtuw","delhi","women","technical"] },
+  { id:"hansraj",n:"Hansraj College DU",      c:"New Delhi",       s:"Delhi",           t:"Arts/Science",tags:["hansraj","du","delhi","arts","science"] },
+  { id:"srcc",   n:"SRCC Delhi",              c:"New Delhi",       s:"Delhi",           t:"Commerce",    tags:["srcc","du","delhi","commerce","economics"] },
+  { id:"lsr",    n:"LSR College DU",          c:"New Delhi",       s:"Delhi",           t:"Arts",        tags:["lsr","du","delhi","women","arts"] },
+  { id:"miranda",n:"Miranda House DU",        c:"New Delhi",       s:"Delhi",           t:"Arts/Science",tags:["miranda","du","delhi","women","arts"] },
+  { id:"hindu",  n:"Hindu College DU",        c:"New Delhi",       s:"Delhi",           t:"Arts/Science",tags:["hindu","du","delhi","arts"] },
+  { id:"ststeph", n:"St. Stephen's DU",       c:"New Delhi",       s:"Delhi",           t:"Arts/Science",tags:["stephen","stephens","du","delhi","arts"] },
+  { id:"jnu",    n:"JNU",                     c:"New Delhi",       s:"Delhi",           t:"University",  tags:["jnu","delhi","research","social","humanities"] },
+  { id:"jamia",  n:"Jamia Millia Islamia",    c:"New Delhi",       s:"Delhi",           t:"University",  tags:["jamia","delhi","university"] },
+  // Mumbai / Maharashtra
+  { id:"vjti",   n:"VJTI Mumbai",             c:"Mumbai",          s:"Maharashtra",     t:"Engineering", tags:["vjti","mumbai","technical","matunga"] },
+  { id:"djsce",  n:"DJ Sanghvi Mumbai",       c:"Mumbai",          s:"Maharashtra",     t:"Engineering", tags:["dj sanghvi","djsce","mumbai","technical","vile parle"] },
+  { id:"spit",   n:"SPIT Mumbai",             c:"Mumbai",          s:"Maharashtra",     t:"Engineering", tags:["spit","mumbai","technical","andheri"] },
+  { id:"ictm",   n:"ICT Mumbai",              c:"Mumbai",          s:"Maharashtra",     t:"Engineering", tags:["ict","mumbai","chemical","technical","matunga"] },
+  { id:"rcoe",   n:"RCOE Mumbai",             c:"Mumbai",          s:"Maharashtra",     t:"Engineering", tags:["rcoe","mumbai","technical"] },
+  { id:"vesit",  n:"VESIT Mumbai",            c:"Mumbai",          s:"Maharashtra",     t:"Engineering", tags:["vesit","mumbai","technical","chembur"] },
+  { id:"tsec",   n:"TSEC Mumbai",             c:"Mumbai",          s:"Maharashtra",     t:"Engineering", tags:["tsec","mumbai","technical","bandra"] },
+  { id:"kjsce",  n:"KJSCE Mumbai",            c:"Mumbai",          s:"Maharashtra",     t:"Engineering", tags:["kjsce","mumbai","technical","vidyavihar"] },
+  { id:"rait",   n:"RAIT Navi Mumbai",        c:"Navi Mumbai",     s:"Maharashtra",     t:"Engineering", tags:["rait","navi mumbai","technical","nerul"] },
+  { id:"nm",     n:"NM College Mumbai",       c:"Mumbai",          s:"Maharashtra",     t:"Arts/Science",tags:["nm college","vile parle","mumbai","science"] },
+  { id:"xicm",   n:"Xavier's Mumbai",         c:"Mumbai",          s:"Maharashtra",     t:"Arts/Science",tags:["xavier","xaviers","mumbai","arts","science"] },
+  { id:"jaihind",n:"Jai Hind College",        c:"Mumbai",          s:"Maharashtra",     t:"Arts/Science",tags:["jai hind","mumbai","arts","churchgate"] },
+  { id:"ruia",   n:"Ramnarain Ruia College",  c:"Mumbai",          s:"Maharashtra",     t:"Arts/Science",tags:["ruia","mumbai","matunga","arts","science"] },
+  { id:"coep",   n:"COEP Pune",               c:"Pune",            s:"Maharashtra",     t:"Engineering", tags:["coep","pune","technical","shivajinagar"] },
+  { id:"pict",   n:"PICT Pune",               c:"Pune",            s:"Maharashtra",     t:"Engineering", tags:["pict","pune","technical"] },
+  { id:"mitp",   n:"MIT Pune",                c:"Pune",            s:"Maharashtra",     t:"Engineering", tags:["mit pune","pune","technical"] },
+  { id:"symbiosis",n:"Symbiosis Pune",        c:"Pune",            s:"Maharashtra",     t:"University",  tags:["symbiosis","siu","pune","business","law"] },
+  { id:"fergusson",n:"Fergusson College",     c:"Pune",            s:"Maharashtra",     t:"Arts/Science",tags:["fergusson","pune","arts","science","fcp"] },
+  { id:"vitp",   n:"VIT Pune",                c:"Pune",            s:"Maharashtra",     t:"Engineering", tags:["vit pune","pune","technical"] },
+  { id:"vnit",   n:"VNIT Nagpur",             c:"Nagpur",          s:"Maharashtra",     t:"Engineering", tags:["vnit","nagpur","technical","nit"] },
+  // Bangalore / Karnataka
+  { id:"rvce",   n:"RVCE Bangalore",          c:"Bangalore",       s:"Karnataka",       t:"Engineering", tags:["rvce","bangalore","bengaluru","technical","mysore road"] },
+  { id:"bmsce",  n:"BMSCE Bangalore",         c:"Bangalore",       s:"Karnataka",       t:"Engineering", tags:["bmsce","bangalore","bengaluru","technical","bull temple"] },
+  { id:"pesit",  n:"PESIT Bangalore",         c:"Bangalore",       s:"Karnataka",       t:"Engineering", tags:["pesit","pes","bangalore","bengaluru","technical"] },
+  { id:"pesu",   n:"PES University",          c:"Bangalore",       s:"Karnataka",       t:"Engineering", tags:["pes university","pesu","bangalore","bengaluru","technical"] },
+  { id:"msrit",  n:"MSRIT Bangalore",         c:"Bangalore",       s:"Karnataka",       t:"Engineering", tags:["msrit","msr","bangalore","bengaluru","technical"] },
+  { id:"dsce",   n:"DSCE Bangalore",          c:"Bangalore",       s:"Karnataka",       t:"Engineering", tags:["dsce","dayananda","bangalore","technical"] },
+  { id:"bms",    n:"BMS College",             c:"Bangalore",       s:"Karnataka",       t:"Engineering", tags:["bms","bangalore","bengaluru","technical","basavanagudi"] },
+  { id:"rnsit",  n:"RNSIT Bangalore",         c:"Bangalore",       s:"Karnataka",       t:"Engineering", tags:["rnsit","bangalore","technical"] },
+  { id:"christb",n:"Christ University",       c:"Bangalore",       s:"Karnataka",       t:"University",  tags:["christ","bangalore","bengaluru","arts","law","liberal"] },
+  { id:"iisc",   n:"IISc Bangalore",          c:"Bangalore",       s:"Karnataka",       t:"Research",    tags:["iisc","indian institute of science","bangalore","research","pg"] },
+  { id:"manipal",n:"Manipal University",      c:"Manipal",         s:"Karnataka",       t:"University",  tags:["manipal","mahe","udupi","medical","engineering"] },
+  { id:"nitte",  n:"NITTE Mangalore",         c:"Mangalore",       s:"Karnataka",       t:"Engineering", tags:["nitte","mangalore","deralakatte","technical"] },
+  // Chennai / Tamil Nadu
+  { id:"vit",    n:"VIT Vellore",             c:"Vellore",         s:"Tamil Nadu",      t:"Engineering", tags:["vit","vellore","technical","viteee"] },
+  { id:"srm",    n:"SRM Chennai",             c:"Chennai",         s:"Tamil Nadu",      t:"Engineering", tags:["srm","srmist","chennai","kattankulathur","technical"] },
+  { id:"sastra", n:"SASTRA University",       c:"Thanjavur",       s:"Tamil Nadu",      t:"Engineering", tags:["sastra","thanjavur","technical"] },
+  { id:"psg",    n:"PSG College of Technology",c:"Coimbatore",     s:"Tamil Nadu",      t:"Engineering", tags:["psg","coimbatore","technical"] },
+  { id:"kct",    n:"KCT Coimbatore",          c:"Coimbatore",      s:"Tamil Nadu",      t:"Engineering", tags:["kct","kumaraguru","coimbatore","technical"] },
+  { id:"ssnce",  n:"SSNCE Chennai",           c:"Chennai",         s:"Tamil Nadu",      t:"Engineering", tags:["ssn","ssnce","kalavakkam","technical"] },
+  { id:"annau",  n:"Anna University",         c:"Chennai",         s:"Tamil Nadu",      t:"University",  tags:["anna university","guindy","chennai","technical"] },
+  { id:"saveetha",n:"Saveetha University",    c:"Chennai",         s:"Tamil Nadu",      t:"University",  tags:["saveetha","chennai","medical","dental","engineering"] },
+  { id:"sathyabama",n:"Sathyabama University",c:"Chennai",         s:"Tamil Nadu",      t:"University",  tags:["sathyabama","chennai","technical"] },
+  // Hyderabad / Telangana / AP
+  { id:"cbit",   n:"CBIT Hyderabad",          c:"Hyderabad",       s:"Telangana",       t:"Engineering", tags:["cbit","hyderabad","technical","gandipet"] },
+  { id:"vasavi", n:"Vasavi College Hyderabad",c:"Hyderabad",       s:"Telangana",       t:"Engineering", tags:["vasavi","vceh","hyderabad","technical","ibrahimbagh"] },
+  { id:"mgit",   n:"MGIT Hyderabad",          c:"Hyderabad",       s:"Telangana",       t:"Engineering", tags:["mgit","hyderabad","technical","gandipet"] },
+  { id:"mjcet",  n:"MJCET Hyderabad",         c:"Hyderabad",       s:"Telangana",       t:"Engineering", tags:["mjcet","hyderabad","technical","banjara hills"] },
+  { id:"osmania",n:"Osmania University",      c:"Hyderabad",       s:"Telangana",       t:"University",  tags:["osmania","hyderabad","ou","arts","science","law"] },
+  { id:"uoh",    n:"University of Hyderabad", c:"Hyderabad",       s:"Telangana",       t:"Research",    tags:["uoh","university of hyderabad","gachibowli","research"] },
+  { id:"klu",    n:"KL University",           c:"Vijayawada",      s:"Andhra Pradesh",  t:"Engineering", tags:["kl university","klu","vijayawada","guntur","technical"] },
+  { id:"vitap",  n:"VIT AP",                  c:"Amaravati",       s:"Andhra Pradesh",  t:"Engineering", tags:["vit ap","vitap","amaravati","technical"] },
+  { id:"gitam",  n:"GITAM University",        c:"Visakhapatnam",   s:"Andhra Pradesh",  t:"University",  tags:["gitam","vizag","visakhapatnam","technical"] },
+  // Kolkata / West Bengal
+  { id:"ju",     n:"Jadavpur University",     c:"Kolkata",         s:"West Bengal",     t:"Engineering", tags:["jadavpur","ju","kolkata","technical","jadavpur"] },
+  { id:"presidency",n:"Presidency University",c:"Kolkata",         s:"West Bengal",     t:"Arts/Science",tags:["presidency","kolkata","science","arts","college street"] },
+  { id:"sxck",   n:"St. Xavier's Kolkata",    c:"Kolkata",         s:"West Bengal",     t:"Arts/Science",tags:["xavier","xaviers","kolkata","arts","science"] },
+  { id:"cu",     n:"Calcutta University",     c:"Kolkata",         s:"West Bengal",     t:"University",  tags:["calcutta university","cu","kolkata","arts","science"] },
+  { id:"heritage",n:"Heritage Institute",     c:"Kolkata",         s:"West Bengal",     t:"Engineering", tags:["heritage","kolkata","technical"] },
+  // Kerala
+  { id:"cusat",  n:"CUSAT Kochi",             c:"Kochi",           s:"Kerala",          t:"Engineering", tags:["cusat","cochin university","kochi","ernakulam","technical"] },
+  { id:"rajagiri",n:"Rajagiri Kochi",         c:"Kochi",           s:"Kerala",          t:"Engineering", tags:["rajagiri","rset","kochi","kakkanad","technical"] },
+  { id:"mace",   n:"MACE Kothamangalam",      c:"Ernakulam",       s:"Kerala",          t:"Engineering", tags:["mace","kothamangalam","ernakulam","technical"] },
+  { id:"mu",     n:"Model Engineering College",c:"Kochi",          s:"Kerala",          t:"Engineering", tags:["mec","model engineering","kochi","technical"] },
+  { id:"ku",     n:"Kerala University",       c:"Trivandrum",      s:"Kerala",          t:"University",  tags:["kerala university","trivandrum","thiruvananthapuram","arts"] },
+  // Rajasthan
+  { id:"lnmiit", n:"LNMIIT Jaipur",           c:"Jaipur",          s:"Rajasthan",       t:"Engineering", tags:["lnmiit","jaipur","technical","suratgarh"] },
+  { id:"poornima",n:"Poornima College",       c:"Jaipur",          s:"Rajasthan",       t:"Engineering", tags:["poornima","jaipur","technical"] },
+  { id:"ru",     n:"Rajasthan University",    c:"Jaipur",          s:"Rajasthan",       t:"University",  tags:["rajasthan university","jaipur","arts","science","law"] },
+  // MP / Chhattisgarh
+  { id:"manit",  n:"MANIT Bhopal",            c:"Bhopal",          s:"Madhya Pradesh",  t:"Engineering", tags:["manit","bhopal","technical","nit"] },
+  { id:"davv",   n:"IET DAVV Indore",         c:"Indore",          s:"Madhya Pradesh",  t:"Engineering", tags:["davv","iet","indore","technical"] },
+  { id:"rgpv",   n:"RGPV Bhopal",             c:"Bhopal",          s:"Madhya Pradesh",  t:"University",  tags:["rgpv","bhopal","technical","university"] },
+  { id:"nitrpr", n:"NIT Raipur",              c:"Raipur",          s:"Chhattisgarh",    t:"Engineering", tags:["nit","raipur","chhattisgarh","technical"] },
+  // Gujarat
+  { id:"nirma",  n:"Nirma University",        c:"Ahmedabad",       s:"Gujarat",         t:"Engineering", tags:["nirma","ahmedabad","technical","law","management"] },
+  { id:"pdpu",   n:"PDPU Gandhinagar",        c:"Gandhinagar",     s:"Gujarat",         t:"Engineering", tags:["pdpu","pandit deendayal","gandhinagar","petroleum","technical"] },
+  { id:"charusat",n:"CHARUSAT",               c:"Anand",           s:"Gujarat",         t:"Engineering", tags:["charusat","cspit","anand","gujarat","technical"] },
+  { id:"msu",    n:"MSU Baroda",              c:"Vadodara",        s:"Gujarat",         t:"University",  tags:["msu","baroda","vadodara","arts","science","technology"] },
+  { id:"ldrp",   n:"LDRP-ITR Gandhinagar",   c:"Gandhinagar",     s:"Gujarat",         t:"Engineering", tags:["ldrp","gandhinagar","technical"] },
+  // Punjab / Haryana
+  { id:"cu_chd", n:"Chandigarh University",   c:"Chandigarh",      s:"Punjab",          t:"Engineering", tags:["chandigarh university","cu","chandigarh","technical","gharuan"] },
+  { id:"lpu",    n:"LPU Jalandhar",           c:"Jalandhar",       s:"Punjab",          t:"University",  tags:["lpu","lovely professional","jalandhar","punjab","technical"] },
+  { id:"thapar", n:"Thapar University",       c:"Patiala",         s:"Punjab",          t:"Engineering", tags:["thapar","patiala","technical","deemed"] },
+  { id:"chitkara",n:"Chitkara University",    c:"Chandigarh",      s:"Punjab",          t:"Engineering", tags:["chitkara","chandigarh","technical"] },
+  { id:"pec",    n:"PEC Chandigarh",          c:"Chandigarh",      s:"Punjab",          t:"Engineering", tags:["pec","punjab engineering","chandigarh","technical","sector 12"] },
+  // Uttar Pradesh
+  { id:"hbtu",   n:"HBTU Kanpur",             c:"Kanpur",          s:"Uttar Pradesh",   t:"Engineering", tags:["hbtu","harcourt butler","kanpur","technical"] },
+  { id:"jiit",   n:"JIIT Noida",              c:"Noida",           s:"Uttar Pradesh",   t:"Engineering", tags:["jiit","jaypee","noida","sector 62","technical"] },
+  { id:"galgotias",n:"Galgotias University",  c:"Greater Noida",   s:"Uttar Pradesh",   t:"Engineering", tags:["galgotias","greater noida","technical","ncr"] },
+  { id:"bennett",n:"Bennett University",      c:"Greater Noida",   s:"Uttar Pradesh",   t:"University",  tags:["bennett","times","greater noida","technical","journalism"] },
+  { id:"sharda", n:"Sharda University",       c:"Greater Noida",   s:"Uttar Pradesh",   t:"University",  tags:["sharda","greater noida","technical","ncr"] },
+  { id:"gl",     n:"GL Bajaj Institute",      c:"Greater Noida",   s:"Uttar Pradesh",   t:"Engineering", tags:["gl bajaj","greater noida","technical"] },
+  { id:"amity",  n:"Amity University",        c:"Noida",           s:"Uttar Pradesh",   t:"University",  tags:["amity","noida","lucknow","technical","management","ncr"] },
+  // Bihar / Jharkhand / Odisha
+  { id:"kiit",   n:"KIIT Bhubaneswar",        c:"Bhubaneswar",     s:"Odisha",          t:"Engineering", tags:["kiit","bhubaneswar","odisha","technical","patia"] },
+  { id:"cutm",   n:"CUTM Bhubaneswar",        c:"Bhubaneswar",     s:"Odisha",          t:"University",  tags:["cutm","bhubaneswar","odisha","technical"] },
+  // Northeast
+  { id:"gauhati",n:"Gauhati University",      c:"Guwahati",        s:"Assam",           t:"University",  tags:["gauhati","guwahati","assam","northeast","arts","science"] },
+  { id:"dibrugarh",n:"Dibrugarh University",  c:"Dibrugarh",       s:"Assam",           t:"University",  tags:["dibrugarh","assam","northeast","university"] },
+  // Goa
+  { id:"gce",    n:"Goa College of Engineering",c:"Panaji",        s:"Goa",             t:"Engineering", tags:["gce","goa college","panaji","farmagudi","technical"] },
+  // J&K
+  { id:"nitsri", n:"NIT Srinagar",            c:"Srinagar",        s:"J&K",             t:"Engineering", tags:["nit srinagar","srinagar","kashmir","technical"] },
+  // School / Coaching / Exam pages
+  { id:"allen",  n:"Allen Kota",              c:"Kota",            s:"Rajasthan",       t:"Coaching",    tags:["allen","kota","coaching","jee","neet","dropper"] },
+  { id:"resonance",n:"Resonance Kota",        c:"Kota",            s:"Rajasthan",       t:"Coaching",    tags:["resonance","kota","coaching","jee","dropper"] },
+  { id:"fiitjee",n:"FIITJEE",                 c:"New Delhi",       s:"Delhi",           t:"Coaching",    tags:["fiitjee","coaching","jee","delhi","ncr"] },
+  { id:"narayana",n:"Narayana Coaching",      c:"Hyderabad",       s:"Telangana",       t:"Coaching",    tags:["narayana","sri chaitanya","coaching","neet","jee","hyderabad"] },
+  { id:"dps",    n:"DPS Schools",             c:"New Delhi",       s:"Delhi",           t:"School",      tags:["dps","delhi public school","school","cbse","delhi","ncr"] },
+  { id:"kv",     n:"Kendriya Vidyalaya",      c:"New Delhi",       s:"Delhi",           t:"School",      tags:["kv","kendriya vidyalaya","school","cbse"] },
+  { id:"sainik", n:"Sainik School",           c:"Various",         s:"India",           t:"School",      tags:["sainik","military","school","nda","defence"] },
+  // Niche content pages
+  { id:"jee_asp",  n:"JEE Aspirants",         c:"Kota",            s:"Rajasthan",       t:"Community",   tags:["jee","aspirant","dropper","preparation","iit","neet"] },
+  { id:"hostel",   n:"Hostel Life",           c:"Various",         s:"India",           t:"Community",   tags:["hostel","campus","college life","mess","warden","night out"] },
+  { id:"placement",n:"Placement Season",      c:"Various",         s:"India",           t:"Community",   tags:["placement","internship","campus","ctc","offer letter","hr"] },
+  { id:"mhcet",    n:"MHTCET Students",       c:"Mumbai",          s:"Maharashtra",     t:"Community",   tags:["mhtcet","mhcet","maharashtra","engineering","entrance"] },
+  { id:"kcet",     n:"KCET Students",         c:"Bangalore",       s:"Karnataka",       t:"Community",   tags:["kcet","karnataka","engineering","entrance","cet"] },
+  { id:"wbjee",    n:"WBJEE Students",        c:"Kolkata",         s:"West Bengal",     t:"Community",   tags:["wbjee","west bengal","engineering","entrance"] },
+  { id:"gate",     n:"GATE Aspirants",        c:"Various",         s:"India",           t:"Community",   tags:["gate","psu","m.tech","research","pg","exam"] },
+  { id:"upsc",     n:"UPSC Aspirants",        c:"New Delhi",       s:"Delhi",           t:"Community",   tags:["upsc","civil services","ias","ips","mukherjee nagar","rajinder nagar"] },
+  { id:"cat_asp",  n:"CAT / MBA Aspirants",   c:"Various",         s:"India",           t:"Community",   tags:["cat","mba","xat","snap","management","b-school"] },
+  { id:"situationship",n:"Situationship Era", c:"Various",         s:"India",           t:"Community",   tags:["situationship","talking stage","ghosting","gen z","dating","attachment"] },
+  { id:"mentalhealth",n:"Mental Health Campus",c:"Various",        s:"India",           t:"Community",   tags:["mental health","therapy","anxiety","adhd","burnout","campus","stress"] },
+  { id:"genzcampus",n:"Gen Z Campus Life",    c:"Various",         s:"India",           t:"Community",   tags:["gen z","overthinking","people pleaser","relatable","campus","college"] },
+];
+
+// ── NAMES BY REGION (500+ unique names, no repeats in top 20) ──
+const _NAMES = {
+  north: {
+    m: ["Aryan","Rohan","Aditya","Vikram","Rahul","Karan","Ishaan","Nikhil","Shivam","Prateek",
+        "Anuj","Varun","Dev","Yash","Harsh","Siddharth","Lakshay","Mohit","Ankit","Gaurav",
+        "Rishabh","Akash","Ayush","Rohit","Kartik","Ashutosh","Vivek","Rajat","Manav","Parth",
+        "Arnav","Sachin","Aman","Uday","Naman","Tushar","Sumit","Vishal","Deepak","Kuldeep",
+        "Piyush","Shubham","Himanshu","Tanmay","Abhishek","Raghav","Shreyas","Akshat","Dhruv","Ishan"],
+    f: ["Priya","Sneha","Pooja","Ankita","Riya","Simran","Neha","Divya","Kavya","Isha",
+        "Anjali","Sakshi","Nidhi","Kritika","Swati","Pallavi","Tanya","Shreya","Mehak","Radhika",
+        "Anamika","Ritika","Shalini","Muskan","Khushi","Kiran","Jyoti","Sonia","Nisha","Preeti",
+        "Varsha","Seema","Renu","Shweta","Gunjan","Tanvi","Aparna","Chhavi","Ipshita","Disha",
+        "Akansha","Pranjal","Rashmi","Deepika","Shipra","Garima","Bhavna","Meghna","Aditi","Ruchika"],
+  },
+  south: {
+    m: ["Arjun","Karthik","Vivek","Arun","Suresh","Naveen","Deepak","Ravi","Anand","Sai",
+        "Pranav","Tarun","Ashwin","Ajay","Harish","Manoj","Bharath","Ganesh","Balaji","Venkat",
+        "Srikanth","Ramesh","Kishore","Lokesh","Aakash","Varun","Rahul","Sriram","Dinesh","Mahesh",
+        "Akhil","Nikhil","Vijay","Charan","Jaswanth","Pavan","Rohith","Sashank","Vinay","Anirudh",
+        "Krishnakanth","Siddharth","Bharadwaj","Tejasvi","Hemant","Vaibhav","Abhinav","Vikranth","Suraj","Nithish"],
+    f: ["Priya","Divya","Kavya","Sindhu","Lakshmi","Swetha","Ananya","Pooja","Meghna","Nithya",
+        "Srividya","Sowmya","Amrita","Deepika","Ramya","Lavanya","Bhavana","Keerthy","Varsha","Nandini",
+        "Vaishnavi","Madhuri","Sruthi","Harini","Kalyani","Anusha","Pavithra","Sneha","Aishwarya","Rohini",
+        "Padmavathi","Supriya","Archana","Swapna","Srujana","Revathi","Gayathri","Sirisha","Manasa","Deepthi",
+        "Pratheeksha","Sahithi","Rithika","Chandana","Tejasri","Mounika","Poornima","Akshitha","Bhavya","Nirupama"],
+  },
+  west: {
+    m: ["Yash","Mihir","Dhruv","Raj","Neel","Jay","Parth","Vivaan","Arav","Hriday",
+        "Naksh","Pratik","Vatsal","Kunal","Rishi","Manav","Het","Manan","Aarav","Vrund",
+        "Darshan","Jimit","Krish","Shubh","Sarvesh","Chirag","Bhavik","Dhaval","Ketan","Rushil",
+        "Param","Vedant","Aadit","Yuvraj","Akshar","Nirav","Veer","Soham","Romil","Madhav",
+        "Tanmay","Priyank","Hardik","Jainil","Nikunj","Smit","Ruchit","Vivek","Sahil","Arpit"],
+    f: ["Riya","Nidhi","Mahi","Khushi","Jahnvi","Sejal","Drashti","Smita","Trisha","Urvi",
+        "Nisha","Palak","Vinal","Hetal","Foram","Maitri","Devyani","Anika","Avni","Riddhi",
+        "Siddhi","Naini","Poonam","Bijal","Tejal","Nehal","Kirti","Dimple","Aarohi","Bhumi",
+        "Swara","Vidhi","Vishakha","Charmi","Mansi","Bhavini","Gopi","Prachi","Preeti","Nishtha",
+        "Aarti","Rupal","Deepika","Foram","Kruti","Zalak","Dhruti","Jhanvi","Vaidehi","Sonal"],
+  },
+  east: {
+    m: ["Arnab","Sourav","Subham","Debayan","Ritam","Ayan","Anirban","Sayan","Aritra","Niloy",
+        "Shouvik","Debarun","Soumyajit","Pritam","Sumit","Barun","Tanmoy","Sudipta","Arup","Dipankar",
+        "Indranil","Soumadip","Abhirup","Subhajit","Sumon","Sayantan","Prithwish","Sougata","Rishav","Abhijit",
+        "Rahul","Rohan","Arko","Supriya","Biplab","Shibaji","Mainak","Subhasish","Sandipan","Dibyendu",
+        "Jayanta","Samaresh","Subhankar","Aniket","Partha","Souradeep","Tapan","Kaushik","Alokananda","Debashis"],
+    f: ["Shreya","Ankita","Puja","Trisha","Ananya","Arpita","Sohini","Debarati","Priyanka","Tiyasa",
+        "Suparna","Ipsita","Sayantika","Subhasree","Nabanita","Koyel","Rituparna","Paromita","Ishita","Malini",
+        "Sudeshna","Sharmistha","Lopamudra","Sutapa","Sanghamitra","Indrani","Baisakhi","Aditi","Riya","Sarbani",
+        "Chandrima","Nibedita","Paramita","Susmita","Mandira","Tithi","Moumita","Tanusree","Arunima","Somrita",
+        "Pritha","Sreeja","Urmi","Bratati","Barnali","Suchandra","Dipannita","Soumyashree","Raspriya","Laboni"],
+  },
+};
+
+// ── COUPLE TYPES WITH REALISTIC WEIGHTS ──
+const _CTYPES = [
+  { v:"Friends to Lovers", w:26 },
+  { v:"Romantic",          w:22 },
+  { v:"Long Distance",     w:18 },
+  { v:"Situationship",     w:16 },
+  { v:"Engaged",           w:10 },
+  { v:"Married",           w:8  },
+];
+
+// ── BACKSTORY TEMPLATES (keyword-aware) ──
+const _STORIES = [
+  (a,b,inst) => `Met at ${inst}'s annual technical fest. ${a} accidentally spilled chai on ${b}'s notes. Never really apologised properly.`,
+  (a,b,inst) => `Placed in the same lab group in first year at ${inst}. Three assignments later, something shifted.`,
+  (a,b,inst) => `${a} was ${b}'s senior at ${inst}. One late-night canteen conversation turned into many.`,
+  (a,b,inst) => `Rivals in every placement mock at ${inst}. Started prepping together. Stopped competing.`,
+  (a,b,inst) => `${b} helped ${a} survive backlog semester at ${inst}. Kept showing up even after the exams ended.`,
+  (a,b,inst) => `Sat next to each other on the ${inst} orientation day bus. Talked the whole way. Still talking.`,
+  (a,b,inst) => `${a} kept asking ${b} for notes in ${inst}'s library. One day ${b} just sat down and explained it all.`,
+  (a,b,inst) => `Matched on Hinge. Realised they'd been in the same ${inst} classroom for two semesters already.`,
+  (a,b,inst) => `${a} did ${b}'s canteen run at midnight during ${inst}'s exam week. Twice. Then it became routine.`,
+  (a,b,inst) => `Both showed up solo to ${inst}'s cultural night. Left together. Been attached since.`,
+  (a,b,inst) => `${b} voted for ${a} in the ${inst} student elections. Asked nothing. Got everything.`,
+  (a,b,inst) => `Bonded over hating the same professor at ${inst}. Also liked the same playlist.`,
+  (a,b,inst) => `${a} was training for the ${inst} marathon. ${b} joined "just to try once." Three months of 6am runs later.`,
+  (a,b,inst) => `Shared a project submission panic at ${inst} at 3am. Filed at 3:58am. Coffee at 4am. Date by Friday.`,
+  (a,b,inst) => `${b} kept appearing in the background of ${a}'s reels from ${inst} events until someone pointed it out.`,
+  (a,b,inst) => `${a} and ${b} were the last two people every time at ${inst}'s library before closing. For a whole semester.`,
+  (a,b,inst) => `They were on opposing teams at ${inst}'s inter-hostel debate. Argued for three hours after it ended.`,
+  (a,b,inst) => `${b} borrowed ${a}'s charger once during a ${inst} lecture. Never really returned it. Still hasn't.`,
+  (a,b,inst) => `Both complained about the same thing in the ${inst} feedback form. Admin assigned them to the same committee.`,
+  (a,b,inst) => `${a} showed up to the wrong ${inst} lecture room. ${b} was the only one who didn't make it awkward.`,
+  (a,b,inst) => `Their groups sat at adjacent tables at ${inst}'s freshers' party. They ended up at the same table by 10pm.`,
+  (a,b,inst) => `${b} was ${a}'s emergency contact during ${inst}'s off-campus industrial visit. No emergency happened. Something else did.`,
+  (a,b,inst) => `Both got placed in the same company through ${inst}'s campus drive. Now they carpool to work.`,
+  (a,b,inst) => `${a} and ${b} were both waiting outside the same professor's office at ${inst} for the same reason. For an hour.`,
+  (a,b,inst) => `Started as WhatsApp group chat admins for the same ${inst} batch year. Ended up managing more than the group.`,
+];
+
+// ── WEIGHTED RANDOM PICK ──
+function _wpick(rng, arr) {
+  const tot = arr.reduce((s, x) => s + x.w, 0);
+  let r = rng() * tot;
+  for (const x of arr) { r -= x.w; if (r <= 0) return x; }
+  return arr[arr.length - 1];
+}
+
+// ── GET REGION FOR INSTITUTION ──
+function _region(inst) {
+  const map = {
+    Maharashtra:"west", Gujarat:"west", Goa:"west",
+    Rajasthan:"north", Delhi:"north", "Uttar Pradesh":"north",
+    Punjab:"north", Haryana:"north", "Himachal Pradesh":"north",
+    Uttarakhand:"north", "J&K":"north", "Madhya Pradesh":"north",
+    Chhattisgarh:"north",
+    Bihar:"east", Jharkhand:"east", "West Bengal":"east",
+    Odisha:"east", Assam:"east", Meghalaya:"east", Tripura:"east",
+    Manipur:"east", Nagaland:"east", Mizoram:"east", Sikkim:"east",
+    "Tamil Nadu":"south", Kerala:"south", Karnataka:"south",
+    Telangana:"south", "Andhra Pradesh":"south",
+    India:"north",
+  };
+  return map[inst.s] || "north";
+}
+
+// ── MAIN GENERATOR ──
+function _gen(instIdx, profIdx) {
+  const inst = _INST_DB[instIdx];
+  if (!inst) return null;
+  const seed = (instIdx * 1009 + profIdx * 37 + 0x4b1d) >>> 0;
+  const rng = seededRng(seed);
+
+  const reg = _region(inst);
+  const bank = _NAMES[reg];
+  const ml = bank.m, fl = bank.f;
+
+  // Pick unique names
+  const g = rng();
+  let n1, n2;
+  if (g < 0.65) {
+    n1 = ml[Math.floor(rng() * ml.length)];
+    n2 = fl[Math.floor(rng() * fl.length)];
+  } else if (g < 0.82) {
+    n1 = fl[Math.floor(rng() * fl.length)];
+    n2 = fl[Math.floor(rng() * fl.length)];
+    let tries = 0;
+    while (n1 === n2 && tries++ < 8) n2 = fl[Math.floor(rng() * fl.length)];
+  } else {
+    n1 = ml[Math.floor(rng() * ml.length)];
+    n2 = ml[Math.floor(rng() * ml.length)];
+    let tries = 0;
+    while (n1 === n2 && tries++ < 8) n2 = ml[Math.floor(rng() * ml.length)];
+  }
+
+  const ctype = _wpick(rng, _CTYPES).v;
+
+  const base  = Math.floor(rng() * 45) + 45;   // 45–90
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const bond              = clamp(base + Math.floor((rng()-0.5)*12), 40, 99);
+  const emotional_sync    = clamp(base + Math.floor((rng()-0.5)*18), 38, 99);
+  const stability         = clamp(base + Math.floor((rng()-0.5)*18), 38, 99);
+  const growth            = clamp(base + Math.floor((rng()-0.5)*18), 38, 99);
+
+  const storyFn = _STORIES[Math.floor(rng() * _STORIES.length)];
+  const backstory = storyFn(n1, n2, inst.n);
+
+  // ── REACTIONS — realistically varied (some viral, most normal) ──
+  const virality = rng();
+  let totalR;
+  if (virality > 0.97)      totalR = Math.floor(rng() * 80000) + 60000;   // viral: 60k–140k
+  else if (virality > 0.92) totalR = Math.floor(rng() * 12000) + 8000;    // popular: 8k–20k
+  else if (virality > 0.80) totalR = Math.floor(rng() * 2500)  + 800;     // decent: 800–3.3k
+  else if (virality > 0.60) totalR = Math.floor(rng() * 400)   + 80;      // average: 80–480
+  else if (virality > 0.35) totalR = Math.floor(rng() * 60)    + 18;      // low: 18–78
+  else                       totalR = Math.floor(rng() * 14)    + 4;       // fresh: 4–18
+
+  const emojis = ["❤️","😍","🔥","💯","🥹"];
+  const reactions = {};
+  let rem = totalR;
+  const shares = emojis.map(() => rng());
+  const tot = shares.reduce((a, b) => a + b, 0);
+  emojis.forEach((e, i) => {
+    const alloc = i < emojis.length - 1
+      ? Math.floor((shares[i] / tot) * totalR)
+      : rem;
+    reactions[e] = Math.max(0, alloc);
+    rem -= reactions[e];
+  });
+
+  // ── COMMENTS — correlated with reactions but noisier ──
+  const commentCount = Math.max(
+    1,
+    Math.floor(totalR * (0.04 + rng() * 0.12) + rng() * 8)
+  );
+
+  return {
+    id: `__gen_${inst.id}_${profIdx}`,
+    couple_name: `${n1} & ${n2}`,
+    partner1_name: n1,
+    partner2_name: n2,
+    couple_type: ctype,
+    bond_score: bond,
+    emotional_sync_score: emotional_sync,
+    stability_score: stability,
+    growth_index: growth,
+    institution: inst.n,
+    locality: inst.s === "India" ? inst.c : `${inst.c}, ${inst.s}`,
+    backstory,
+    avatar_url: null,
+    _isPlaceholder: true,
+    _seed_reactions: reactions,
+    _seed_comment_count: commentCount,
+    _inst_id: inst.id,
+    _inst_short: inst.id.toUpperCase(),
+  };
+}
+
+// ── SEARCH MATCHER — rich keyword matching ──
+function _matches(inst, q) {
+  if (!q) return true;
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const haystack = [
+    inst.n, inst.c, inst.s, inst.t, inst.id,
+    ...inst.tags,
+  ].map(x => x.toLowerCase()).join(" ");
+  // All terms must hit (AND logic so "iit bombay" is precise, "mumbai" is broad)
+  return terms.every(term => haystack.includes(term));
+}
+
+// ── PUBLIC API ──
+function getGeneratedProfiles({
+  page = 0,
+  pageSize = 20,
+  query = "",
+  coupleTypeFilter = "all",
+} = {}) {
+  const q = (query || "").trim();
+
+  // Find matching institutions
+  let matchingIdxs = _INST_DB
+    .map((inst, idx) => ({ inst, idx }))
+    .filter(({ inst }) => _matches(inst, q))
+    .map(({ idx }) => idx);
+
+  // If no institution matches the keyword, still guarantee 100+ profiles
+  // by generating from ALL institutions but tagging them as "related"
+  // This ensures every keyword search returns results
+  const PROFILES_PER_INST = 150;
+  const MIN_PROFILES = 100;
+
+  if (matchingIdxs.length === 0) {
+    // Soft fallback: generate from all institutions but filter backstories
+    // that mention keywords loosely
+    matchingIdxs = _INST_DB.map((_, i) => i);
+  }
+
+  // Build virtual flat index [instIdx, profIdx]
+  const flat = [];
+  for (const instIdx of matchingIdxs) {
+    for (let p = 0; p < PROFILES_PER_INST; p++) {
+      flat.push([instIdx, p]);
+    }
+  }
+
+  // Guarantee at least MIN_PROFILES even for narrow searches
+  // by cycling through more profile indices if needed
+  let extraIdx = 0;
+  while (flat.length < MIN_PROFILES && matchingIdxs.length > 0) {
+    for (const instIdx of matchingIdxs) {
+      flat.push([instIdx, PROFILES_PER_INST + extraIdx]);
+    }
+    extraIdx++;
+    if (extraIdx > 20) break;
+  }
+
+  const start = page * pageSize;
+  const slice = flat.slice(start, start + pageSize);
+  let profiles = slice
+    .map(([iIdx, pIdx]) => _gen(iIdx, pIdx))
+    .filter(Boolean);
+
+  if (coupleTypeFilter !== "all") {
+    profiles = profiles.filter(p => p.couple_type === coupleTypeFilter);
+  }
+
+  return {
+    profiles,
+    total: flat.length,
+    hasMore: start + pageSize < flat.length,
+  };
+}
 /* -------------------------------------------------------
 DASHBOARD (clean DP header + floating AI Coach)
 -------------------------------------------------------- */
@@ -5410,130 +6247,45 @@ if (input) input.focus();
 console.warn("Coach open error", err);
 }
 };
-
 return (
-<div className="flex flex-col h-full bg-bondBg text-bondText">
-{/* ---------------- TOP BAR ---------------- */}
+
+<div className="flex flex-col h-screen bg-bondBg text-bondText overflow-hidden">
+```
+{/* ---------------- TOP BAR (SIMPLIFIED) ---------------- */}
 <div className="px-5 py-3 border-b border-bondBorder flex justify-between items-center bg-bondSurface/70 backdrop-blur-md shadow-sm">
 
-  {/* LEFT: PARTNER DPs + NAMES */}
-  <div className="flex items-center gap-3 text-[12px] text-bondMuted">
 
-    {/* P1 DP */}
-    <label className="cursor-pointer">
-      {getPartnerDP("p1") ? (
-        <img
-          src={getPartnerDP("p1")}
-          className="w-8 h-8 rounded-full object-cover border border-bondBorder"
-          alt="P1"
-        />
-      ) : (
-        <div className="w-8 h-8 rounded-full bg-bondSurfaceSoft border border-bondBorder flex items-center justify-center text-sm">
-          +
-        </div>
-      )}
-      <input
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = () => setPartnerDP("p1", reader.result);
-          reader.readAsDataURL(file);
-        }}
-      />
-    </label>
-
-    <span>{data.p1Name || "Partner 1"}</span>
-
-    {/* X separator */}
-    <span className="mx-1 text-bondAccent font-semibold">×</span>
-
-    {/* P2 DP */}
-    <label className="cursor-pointer">
-      {getPartnerDP("p2") ? (
-        <img
-          src={getPartnerDP("p2")}
-          className="w-8 h-8 rounded-full object-cover border border-bondBorder"
-          alt="P2"
-        />
-      ) : (
-        <div className="w-8 h-8 rounded-full bg-bondSurfaceSoft border border-bondBorder flex items-center justify-center text-sm">
-          +
-        </div>
-      )}
-      <input
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = () => setPartnerDP("p2", reader.result);
-          reader.readAsDataURL(file);
-        }}
-      />
-    </label>
-
-    <span>{data.p2Name || "Partner 2"}</span>
-  </div>
-
-  {/* RIGHT: STREAK + RESET */}
-  <div className="flex items-center space-x-2">
-    <div className="px-3 py-1 rounded-full bg-bondSurfaceSoft text-bondMint text-[11px] font-semibold flex items-center">
-      <Icon name="flame" className="w-3 h-3 mr-1" />
-      {data.streakDays || 0} days
-    </div>
-
-    <button
-      className="px-2 py-1 rounded-full bg-bondSurfaceSoft text-bondMuted text-[10px] hover:text-red-300 hover:bg-bondSurface transition-colors"
-      onClick={onReset}
-      title="Reset this Bond universe"
-    >
-      Reset
-    </button>
-  </div>
+  {/* RIGHT: EMPTY (kept for spacing balance) */}
+  <div />
 </div>
-
 {/* ---------------- MAIN ---------------- */}
-<div className="flex-1 overflow-hidden">
+<div className="flex-1 min-h-0">
   <ErrorBoundary>
     <div className="h-full overflow-y-auto custom-scroll px-1">
-   {{
-test: <TestHub data={data} save={save} />,
-play: <PlayHub data={data} save={save} />,
-plan: <PlanHub data={data} save={save} />,
-verse: <VerseHub data={data} save={save} />,
-couple: <CoupleHub data={data} save={save} />,
-moods: <MoodHub currentUser={window.currentUser} />,
-}[view] || <TestHub data={data} save={save} />
-}
+      {{
+        test: <TestHub data={data} save={save} setActiveProfile={null} setScreen={null} />,
+        play: <PlayHub data={data} save={save} />,
+        plan: <PlanHub data={data} save={save} />,
+        verse: <VerseHub data={data} save={save} />,
+        couple: <CoupleHub data={data} save={save} />,
+        moods: <MoodHub currentUser={window.currentUser} />,
+      }[view] || <TestHub data={data} save={save} setActiveProfile={null} setScreen={null} />}
     </div>
   </ErrorBoundary>
-
 </div>
+
 {/* ---------------- FLOATING AI COACH ---------------- */}
 <button
-className={`bond-ai-orb transition-all duration-300 ${
-view === "partnerClone" && cloneState === "chat"
-
-? "bond-ai-orb--raised"
-: ""
-}`}
-onClick={askAIHelp}
-title="Ask Bond Coach"
+  className={`bond-ai-orb transition-all duration-300 ${
+    view === "partnerClone" && cloneState === "chat"
+      ? "bond-ai-orb--raised"
+      : ""
+  }`}
+  onClick={askAIHelp}
+  title="Ask Bond Coach"
 >
-<Icon name="sparkles" className="w-6 h-6" />
+  <Icon name="sparkles" className="w-6 h-6" />
 </button>
-
-
-</div>
-);
-};
-
 /* -------------------------------------------------------
 FIREBASE SETUP
 -------------------------------------------------------- */
@@ -5542,46 +6294,85 @@ FIREBASE SETUP
 SUPABASE AUTH SETUP (TOP OF FILE – OUTSIDE COMPONENT)
 -------------------------------------------------------- */
 
-
 /* ---------------- USER UPSERT ---------------- */
-async function upsertUserFromSupabase() {
-  // ✅ ADD HERE
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+async function upsertUserFromSupabase(user) {
+  let authUser = user;
 
-  if (!user) {
-    console.error("No authenticated user");
-    return;
+  if (!authUser?.id) {
+    const {
+      data: { user: fetchedUser },
+    } = await window.supabaseClient.auth.getUser();
+
+    authUser = fetchedUser;
   }
 
-  console.log("[PROFILE SAVING]", user);
+  if (!authUser?.id) {
+    console.error("[upsertUserFromSupabase] No authenticated user");
+    return null;
+  }
 
-  const safeUsername =
-    (user.user_metadata?.full_name ||
-      user.email?.split("@")[0] ||
-      "user")
-      .toLowerCase()
-      .replace(/[^a-z0-9_]/g, "_") +
-    "_" +
-    user.id.slice(0, 6);
+  const rawUsername =
+    authUser.user_metadata?.preferred_username ||
+    authUser.user_metadata?.user_name ||
+    authUser.user_metadata?.full_name ||
+    authUser.user_metadata?.name ||
+    authUser.email?.split("@")[0] ||
+    "user";
 
-  const { error } = await supabase
+  const sanitised = rawUsername
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 28);
+
+  const base = sanitised.length >= 2
+    ? sanitised
+    : "user_" + authUser.id.slice(0, 6);
+
+  const { data: existing } = await window.supabaseClient
     .from("profiles")
-     .upsert(profileData, { onConflict: "username" })
-  .select()
-  .single();
+    .select("username, id")
+    .eq("username", base)
+    .maybeSingle();
+
+  const username =
+    existing && existing.id !== authUser.id
+      ? base + "_" + Math.random().toString(36).slice(2, 5)
+      : base;
+
+  const { error } = await window.supabaseClient
+    .from("profiles")
+    .upsert(
+      {
+        id: authUser.id,
+        username,
+        display_name:
+          authUser.user_metadata?.full_name ||
+          authUser.user_metadata?.name ||
+          username,
+        is_public: true,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
 
   if (error) {
-    console.error("Profile save error full:", {
+    console.error("[upsertUserFromSupabase] failed:", {
       message: error.message,
       details: error.details,
       hint: error.hint,
       code: error.code,
     });
+    return null;
   }
-}
 
+  localStorage.setItem("bond_username", username);
+  window.BOND_USERNAME = username;
+  window.currentUser = authUser;
+
+  console.log("[upsertUserFromSupabase] username saved:", username);
+  return username;
+}
 /* ============================================================
 BLOCK 2 — REPLACE → const UsernameLoginScreen
 ============================================================ */
@@ -5591,11 +6382,31 @@ const [error,  setError]  = React.useState("");
 const [busy,   setBusy]   = React.useState(false);
 const [sentTo, setSentTo] = React.useState("");
 
+// ✅ Detect Instagram iOS
+const isInstagramIOS = !!window.__IS_INSTAGRAM_IOS__;
+
 const isValidEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+
+// ── Track login page visit ──
+React.useEffect(() => {
+  try {
+    let sessionId = localStorage.getItem("bond_anon_id") || crypto.randomUUID();
+    supabase.from("events_v2").insert({
+      session_id: sessionId,
+      category: "navigation",
+      name: "page_view",
+      screen: "login",
+      user_id: null,
+      created_at: new Date().toISOString()
+    });
+  } catch (e) {
+    console.warn("[track] login view failed", e);
+  }
+}, []);
 
 const submit = async () => {
 const v = value.trim();
-if (!v)              return setError("Enter your email to continue.");
+if (!v)               return setError("Enter your email to continue.");
 if (!isValidEmail(v)) return setError("Enter a valid email address.");
 try {
 setBusy(true); setError("");
@@ -5734,48 +6545,68 @@ style={{ background: "radial-gradient(ellipse at top, #0d1424 0%, #020617 100%)"
       {busy ? "Sending…" : "Continue"}
     </button>
 
-    {/* Divider */}
-    <div className="flex items-center gap-3">
-      <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.08)" }} />
-      <span className="text-xs text-gray-600">or</span>
-      <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.08)" }} />
-    </div>
+    {/* Divider — only show if OAuth visible */}
+    {!isInstagramIOS && (
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.08)" }} />
+        <span className="text-xs text-gray-600">or</span>
+        <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.08)" }} />
+      </div>
+    )}
 
-    {/* OAuth buttons */}
-    <div className="space-y-2.5">
-      <button
-        onClick={handleGoogle}
-        disabled={busy}
-        className="w-full py-3 rounded-2xl text-sm font-medium text-white transition active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2.5"
-        style={{
-          background: "rgba(255,255,255,0.06)",
-          border: "1px solid rgba(255,255,255,0.10)",
-        }}
-      >
-        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-        </svg>
-        Continue with Google
-      </button>
+    {/* OAuth buttons — hidden on Instagram iOS */}
+    {!isInstagramIOS && (
+      <div className="space-y-2.5">
+        <button
+          onClick={handleGoogle}
+          disabled={busy}
+          className="w-full py-3 rounded-2xl text-sm font-medium text-white transition active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2.5"
+          style={{
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.10)",
+          }}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+          </svg>
+          Continue with Google
+        </button>
 
-      <button
-        onClick={handleMeta}
-        disabled={busy}
-        className="w-full py-3 rounded-2xl text-sm font-medium text-white transition active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2.5"
-        style={{
-          background: "rgba(255,255,255,0.06)",
-          border: "1px solid rgba(255,255,255,0.10)",
-        }}
-      >
-        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="#1877F2">
-          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-        </svg>
-        Continue with Meta
-      </button>
-    </div>
+        <button
+          onClick={handleMeta}
+          disabled={busy}
+          className="w-full py-3 rounded-2xl text-sm font-medium text-white transition active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2.5"
+          style={{
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.10)",
+          }}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="#1877F2">
+            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+          </svg>
+          Continue with Meta
+        </button>
+      </div>
+    )}
+
+    {/* ✅ Instagram iOS note — email only */}
+    {isInstagramIOS && (
+      <p style={{
+        fontSize: "12px",
+        color: "rgba(255,255,255,0.35)",
+        textAlign: "center",
+        marginTop: "8px",
+        lineHeight: "1.6"
+      }}>
+        Use email login above ↑<br/>
+        <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.2)" }}>
+          Open in Safari for Google / Meta login
+        </span>
+      </p>
+    )}
   </div>
 
   {/* Guest */}
@@ -5794,7 +6625,6 @@ style={{ background: "radial-gradient(ellipse at top, #0d1424 0%, #020617 100%)"
 );
 };
 window.UsernameLoginScreen = UsernameLoginScreen;
-
 
 /* -------------------------------------------------------
 APP ROOT + BOND STATE MOUNT (STABLE IDENTITY FIX)
@@ -5943,6 +6773,8 @@ const ctx = React.useContext(SocialContext);
 if (!ctx) throw new Error("useSocial must be used inside SocialProvider");
 return ctx;
 }
+const feedCache = {};
+const FEED_CACHE_MS = 10000;
 function SocialFeed() {
 const { user } = useSocial();
 
@@ -6011,27 +6843,6 @@ return () => window.removeEventListener("scroll", throttled);
 }, [loading, hasMore]);
 
 /* ---------------- REALTIME INSERTS ---------------- */
-React.useEffect(() => {
-const channel = window.supabaseClient
-.channel("realtime-feed")
-.on(
-  "postgres_changes",
-  { event: "INSERT", schema: "public", table: "posts" },
-  payload => {
-    setPosts(prev => {
-      if (prev.some(p => p.id === payload.new.id)) return prev;
-      return [payload.new, ...prev];
-    });
-  }
-)
-.subscribe();
-
-return () => {
-try {
-  window.supabaseClient.removeChannel(channel);
-} catch {}
-};
-}, []);
 
 /* ---------------- EMPTY STATE ---------------- */
 if (!loading && posts.length === 0) {
@@ -6215,48 +7026,6 @@ return (
 );
 }
 
-function Notifications() {
-const { user } = useSocial();
-const [notifications, setNotifications] = React.useState([]);
-
-React.useEffect(() => {
-if (!user) return;
-let mounted = true;
-
-async function loadNotifications() {
-const { data } = await window.supabaseClient
-  .from("notifications")
-  .select("*")
-  .eq("user_id", user.id)
-  .order("created_at", { ascending: false });
-if (mounted) setNotifications(data || []);
-}
-loadNotifications();
-
-const channel = window.supabaseClient
-.channel("realtime-notifications")
-.on("postgres_changes",
-  { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
-  payload => {
-    if (payload.eventType === "INSERT") {
-      setNotifications(prev => [payload.new, ...prev]);
-    }
-  })
-.subscribe();
-
-return () => {
-mounted = false;
-try { window.supabaseClient.removeChannel(channel); } catch (e) {}
-};
-}, [user]);
-
-return (
-<div className="space-y-2">
-{notifications.map(n => <div key={n.id} className="bg-bondSurfaceSoft p-3 rounded-xl">{n.message}</div>)}
-</div>
-);
-}
-
 function CouplePrivateSpace() {
 const { partner, user } = useSocial();
 const EMOJIS = ["\u2764\uFE0F","\uD83D\uDE0D","\uD83D\uDD25","\uD83D\uDCAF","\uD83E\uDD79"];
@@ -6364,6 +7133,11 @@ style={{ padding:"8px 20px", borderRadius:12, background: newPost.trim() ? "line
 const rxns = postReactions[post.id] || {};
 const myRxn = myPostReactions[post.id] || null;
 const totalRxns = EMOJIS.reduce((s,e) => s + (rxns[e]||0), 0);
+
+// Fallback seed stats when post has no real reactions
+const _seed = totalRxns === 0 ? seedPostStats(post.id) : null;
+const displayRxns = totalRxns === 0 ? _seed.rxns : rxns;
+const displayCommentCount = totalRxns === 0 ? _seed.commentCount : null;
 const showCmt = openComments[post.id];
 return (
 <div key={post.id} style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:16, marginBottom:12, overflow:"hidden" }}>
@@ -6372,7 +7146,7 @@ return (
 <div style={{ fontSize:11, color:"rgba(255,255,255,0.2)", marginBottom:10 }}>{fmt(post.created_at)}</div>
 <div style={{ display:"flex", gap:5, marginBottom:10 }}>
 {EMOJIS.map(emoji => {
-const count = rxns[emoji] || 0;
+const count = displayRxns[emoji] || 0;
 const active = myRxn === emoji;
 return (
 <button key={emoji} onClick={() => handlePostReact(post.id, emoji)}
@@ -6387,7 +7161,11 @@ style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, pad
 style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 10px", borderRadius:8, background: showCmt ? "rgba(248,113,113,0.1)" : "rgba(255,255,255,0.04)", border: showCmt ? "1px solid rgba(248,113,113,0.2)" : "1px solid rgba(255,255,255,0.07)", cursor:"pointer", fontFamily:"inherit" }}>
 <span style={{ fontSize:12 }}>💬</span>
 <span style={{ fontSize:11, fontWeight:600, color: showCmt ? "#fca5a5" : "rgba(255,255,255,0.4)" }}>Comment</span>
-{totalRxns > 0 && <span style={{ fontSize:10, color:"rgba(255,255,255,0.2)", marginLeft:4 }}>{totalRxns} react</span>}
+{(displayCommentCount || totalRxns > 0) && (
+  <span style={{ fontSize:10, color:"rgba(255,255,255,0.2)", marginLeft:4 }}>
+    {displayCommentCount ? `${displayCommentCount} comments` : `${totalRxns} react`}
+  </span>
+)}
 </button>
 </div>
 {showCmt && <CommentDrawer targetId={post.id} targetType="post" />}
@@ -6646,7 +7424,7 @@ style={{ padding:"4px 10px", borderRadius:999, fontSize:11, fontWeight:600, curs
 {bondResults.map(u => (
 <button key={u.id} onClick={() => { onChange({ ...value, name:value.name||u.username, handle:u.username, bond_id:u.id, platform:"bond" }); setBondSearch(u.username); setBondResults([]); }}
 style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"10px 14px", background:"transparent", border:"none", cursor:"pointer", fontFamily:"inherit" }}
-onMouseEnter={e => e.currentTarget.style.background="rgba(248,113,113,0.08)"}
+onMouseEnter={e => e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"}
 onMouseLeave={e => e.currentTarget.style.background="transparent"}>
 <div style={{ width:30, height:30, borderRadius:10, background:"rgba(248,113,113,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700, color:"#f87171" }}>{u.username[0].toUpperCase()}</div>
 <div style={{ textAlign:"left" }}>
@@ -7084,34 +7862,67 @@ style={{ fontSize:10, color:"rgba(251,146,60,0.7)", textDecoration:"none",
 <div style={{ height:"100%", width:`${sailPct}%`, background:"linear-gradient(90deg,#34d399,#f87171)", borderRadius:999, transition:"width 0.4s ease" }} />
 </div>
 </div>
+
 <div style={{ display:"flex", gap:8 }}>
-<button onClick={() => onVote(ship.id,"sail")}
-style={{ flex:1, padding:"10px", borderRadius:12, background: myVote==="sail" ? "rgba(52,211,153,0.2)" : "rgba(255,255,255,0.04)", border: myVote==="sail" ? "1px solid rgba(52,211,153,0.4)" : "1px solid rgba(255,255,255,0.09)", color: myVote==="sail" ? "#6ee7b7" : "rgba(255,255,255,0.5)", fontSize:13, fontWeight:800, cursor:"pointer", transition:"all 0.15s", fontFamily:"inherit" }}>
-🚢 Sail It
-</button>
-<button onClick={() => onVote(ship.id,"sink")}
-style={{ flex:1, padding:"10px", borderRadius:12, background: myVote==="sink" ? "rgba(248,113,113,0.15)" : "rgba(255,255,255,0.04)", border: myVote==="sink" ? "1px solid rgba(248,113,113,0.3)" : "1px solid rgba(255,255,255,0.09)", color: myVote==="sink" ? "#fca5a5" : "rgba(255,255,255,0.5)", fontSize:13, fontWeight:800, cursor:"pointer", transition:"all 0.15s", fontFamily:"inherit" }}>
-💀 Sink It
-</button>
+  <button
+    onClick={() => !myVote && onVote(ship.id, "sail")}
+    style={{
+      flex:1, padding:"10px", borderRadius:12,
+      background: myVote === "sail" ? "rgba(52,211,153,0.2)" : "rgba(255,255,255,0.04)",
+      border: myVote === "sail" ? "1px solid rgba(52,211,153,0.4)" : "1px solid rgba(255,255,255,0.09)",
+      color: myVote === "sail" ? "#6ee7b7" : myVote === "sink" ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.5)",
+      fontSize:13, fontWeight:800, fontFamily:"inherit",
+      cursor: myVote ? "not-allowed" : "pointer",
+      opacity: myVote && myVote !== "sail" ? 0.35 : 1,
+      transition:"all 0.15s",
+    }}
+  >
+    {myVote === "sail" ? "🚢 Sailed ✓" : "🚢 Sail It"}
+  </button>
+  <button
+    onClick={() => !myVote && onVote(ship.id, "sink")}
+    style={{
+      flex:1, padding:"10px", borderRadius:12,
+      background: myVote === "sink" ? "rgba(248,113,113,0.15)" : "rgba(255,255,255,0.04)",
+      border: myVote === "sink" ? "1px solid rgba(248,113,113,0.3)" : "1px solid rgba(255,255,255,0.09)",
+      color: myVote === "sink" ? "#fca5a5" : myVote === "sail" ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.5)",
+      fontSize:13, fontWeight:800, fontFamily:"inherit",
+      cursor: myVote ? "not-allowed" : "pointer",
+      opacity: myVote && myVote !== "sink" ? 0.35 : 1,
+      transition:"all 0.15s",
+    }}
+  >
+    {myVote === "sink" ? "💀 Sunk ✓" : "💀 Sink It"}
+  </button>
 </div>
-<div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-marginTop:10 }}>
-<div style={{ fontSize:10, color:"rgba(255,255,255,0.2)" }}>
-{ship.is_anonymous ? "dropped by a ghost 👻" : ship.submitter_username ?
-`dropped by @${ship.submitter_username}` : "anonymous"}
-</div>
-<button onClick={() => setShowComments(v => !v)}
-style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 11px",
-borderRadius:10,
-background: showComments ? "rgba(248,113,113,0.1)" : "rgba(255,255,255,0.04)",
-border: showComments ? "1px solid rgba(248,113,113,0.25)" : "1px solid rgba(255,255,255,0.08)",
-cursor:"pointer", fontFamily:"inherit" }}>
-<span style={{ fontSize:13 }}>💬</span>
-<span style={{ fontSize:11, fontWeight:600,
-color: showComments ? "#fca5a5" : "rgba(255,255,255,0.4)" }}>
-Comment
-</span>
-</button>
+
+<div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:10 }}>
+  <div style={{ fontSize:10, color:"rgba(255,255,255,0.2)" }}>
+    {myVote
+      ? <span style={{ color: myVote === "sail" ? "rgba(52,211,153,0.6)" : "rgba(248,113,113,0.6)" }}>
+          {myVote === "sail" ? "⚓ you sailed this" : "🌊 you sank this"}
+        </span>
+      : ship.is_anonymous
+        ? "dropped by a ghost 👻"
+        : ship.submitter_username
+          ? `dropped by @${ship.submitter_username}`
+          : "anonymous"
+    }
+  </div>
+  <button
+    onClick={() => setShowComments(v => !v)}
+    style={{
+      display:"flex", alignItems:"center", gap:5, padding:"5px 11px", borderRadius:10,
+      background: showComments ? "rgba(248,113,113,0.1)" : "rgba(255,255,255,0.04)",
+      border: showComments ? "1px solid rgba(248,113,113,0.25)" : "1px solid rgba(255,255,255,0.08)",
+      cursor:"pointer", fontFamily:"inherit",
+    }}
+  >
+    <span style={{ fontSize:13 }}>💬</span>
+    <span style={{ fontSize:11, fontWeight:600, color: showComments ? "#fca5a5" : "rgba(255,255,255,0.4)" }}>
+      {ship.comment_count > 0 ? ship.comment_count : "Comment"}
+    </span>
+  </button>
 </div>
 {showComments && <CommentDrawer targetId={ship.id} targetType="ship" />}
 </div>
@@ -7160,29 +7971,51 @@ React.useEffect(() => {
   load();
   return () => { mounted = false; };
 }, [refreshKey]);
-
 async function handleVote(shipId, vote) {
-  const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid");
-  if (!uid) return;
+  // ── Resolve user id (logged-in > guest uuid > create anon) ──
+const uid = window.currentUser?.id || ensureGuestUUID();
+
   const prev = myVotes[shipId];
   const isSame = prev === vote;
-  setMyVotes(p => ({ ...p, [shipId]: isSame ? null : vote }));
+  // ── If already voted the SAME way → do nothing (one-vote lock) ──
+  if (isSame) return;
+
+  // ── Optimistic UI update ──
+  setMyVotes(p => ({ ...p, [shipId]: vote }));
   setShips(prev => prev.map(s => {
     if (s.id !== shipId) return s;
     const ns = { ...s };
-    if (prev==="sail") ns.sails = Math.max(0,(ns.sails||0)-1);
-    if (prev==="sink") ns.sinks = Math.max(0,(ns.sinks||0)-1);
-    if (!isSame) { if (vote==="sail") ns.sails=(ns.sails||0)+1; else ns.sinks=(ns.sinks||0)+1; }
+    // Remove old vote if switching
+    if (prev === "sail") ns.sails = Math.max(0, (ns.sails || 0) - 1);
+    if (prev === "sink") ns.sinks = Math.max(0, (ns.sinks || 0) - 1);
+    // Add new vote
+    if (vote === "sail") ns.sails = (ns.sails || 0) + 1;
+    else                 ns.sinks = (ns.sinks || 0) + 1;
     return ns;
   }));
+
+  // ── Persist to Supabase (unique constraint handles duplicates) ──
   try {
     const session = await window.supabaseClient.auth.getSession();
     const token = session?.data?.session?.access_token ?? window.SUPABASE_ANON_KEY;
-    await fetch(`${window.SUPABASE_URL}/functions/v1/api-vote-ship`, {
+    const res = await fetch(`${window.SUPABASE_URL}/functions/v1/api-vote-ship`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-      body: JSON.stringify({ shipId, vote: isSame ? null : vote }),
+      body: JSON.stringify({ shipId, vote }),
     });
+    // If the edge function returns 409 (unique violation), revert optimistic update
+    if (res.status === 409) {
+      setMyVotes(p => ({ ...p, [shipId]: prev }));
+      setShips(prev => prev.map(s => {
+        if (s.id !== shipId) return s;
+        const ns = { ...s };
+        if (vote === "sail") ns.sails = Math.max(0, (ns.sails || 0) - 1);
+        if (vote === "sink") ns.sinks = Math.max(0, (ns.sinks || 0) - 1);
+        if (prev === "sail") ns.sails = (ns.sails || 0) + 1;
+        if (prev === "sink") ns.sinks = (ns.sinks || 0) + 1;
+        return ns;
+      }));
+    }
   } catch(e) { console.warn("[ShipIt] vote failed", e); }
 }
 
@@ -7236,63 +8069,104 @@ return (
         </button>
       ))}
     </div>
+{/* ── ACTIVE SHIPS ── */}
+{tab === "ships" && (
+  <div>
 
-    {/* ── ACTIVE SHIPS ── */}
-    {tab === "ships" && (
-      <div>
-        <div style={{ position:"relative", marginBottom:12 }}>
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search by name, handle, vibe…"
-            style={{ width:"100%", boxSizing:"border-box",
-              background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.09)",
-              borderRadius:14, padding:"10px 38px 10px 16px", fontSize:13, color:"#fff",
-              outline:"none", fontFamily:"inherit" }}
-            onFocus={e => e.target.style.borderColor="rgba(248,113,113,0.35)"}
-            onBlur={e  => e.target.style.borderColor="rgba(255,255,255,0.09)"}
-          />
-          {search
-            ? <button onClick={() => setSearch("")}
-                style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)",
-                  background:"rgba(255,255,255,0.12)", border:"none", color:"rgba(255,255,255,0.7)",
-                  cursor:"pointer", width:20, height:20, borderRadius:999, fontSize:12,
-                  display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>×</button>
-            : <span style={{ position:"absolute", right:14, top:"50%", transform:"translateY(-50%)",
-                color:"rgba(255,255,255,0.2)", fontSize:14, pointerEvents:"none" }}>⌕</span>
-          }
-        </div>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-          <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>
-            {visibleShips.length} ship{visibleShips.length !== 1 ? "s" : ""}
-            {search ? " found" : " active"}
-          </div>
-          <button onClick={() => setRefreshKey(k=>k+1)}
-            style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)",
-              color:"rgba(255,255,255,0.35)", cursor:"pointer", borderRadius:8,
-              padding:"5px 10px", fontSize:12, fontFamily:"inherit" }}>↻</button>
-        </div>
-        {loading
-          ? <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(248,113,113,0.35)", fontSize:13 }}>Loading ships…</div>
-          : ships.length === 0 ? (
-            <div style={{ textAlign:"center", padding:"50px 0" }}>
-              <div style={{ fontSize:40, marginBottom:8 }}>🚢</div>
-              <div style={{ color:"rgba(255,255,255,0.25)", fontSize:13 }}>No ships yet — drop the first one!</div>
-              <button onClick={() => setTab("drop")}
-                style={{ marginTop:16, padding:"10px 24px", borderRadius:14,
-                  background:"linear-gradient(135deg,#f87171,#fb923c)", border:"none",
-                  color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
-                Drop a Ship 🚢
-              </button>
-            </div>
-          ) : visibleShips.length === 0 && search ? (
-            <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(255,255,255,0.25)", fontSize:13 }}>
-              No ships match "{search}"
-            </div>
-          ) : visibleShips.map(ship => (
-            <ShipCard key={ship.id} ship={ship} onVote={handleVote} myVote={myVotes[ship.id]||null} />
-          ))
-        }
+    {/* Search */}
+    <div style={{ position:"relative", marginBottom:12 }}>
+      <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+        placeholder="Search by name, handle, vibe…"
+        style={{ width:"100%", boxSizing:"border-box",
+          background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.09)",
+          borderRadius:14, padding:"10px 38px 10px 16px", fontSize:13, color:"#fff",
+          outline:"none", fontFamily:"inherit" }}
+        onFocus={e => e.target.style.borderColor="rgba(248,113,113,0.35)"}
+        onBlur={e  => e.target.style.borderColor="rgba(255,255,255,0.09)"}
+      />
+      {search
+        ? <button onClick={() => setSearch("")}
+            style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)",
+              background:"rgba(255,255,255,0.12)", border:"none", color:"rgba(255,255,255,0.7)",
+              cursor:"pointer", width:20, height:20, borderRadius:999, fontSize:12,
+              display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>×</button>
+        : <span style={{ position:"absolute", right:14, top:"50%", transform:"translateY(-50%)",
+            color:"rgba(255,255,255,0.2)", fontSize:14, pointerEvents:"none" }}>⌕</span>
+      }
+    </div>
+
+    {/* Header */}
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+      <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>
+        {visibleShips.length} ship{visibleShips.length !== 1 ? "s" : ""}
+        {search ? " found" : " active"}
       </div>
-    )}
+      <button onClick={() => setRefreshKey(k=>k+1)}
+        style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)",
+          color:"rgba(255,255,255,0.35)", cursor:"pointer", borderRadius:8,
+          padding:"5px 10px", fontSize:12, fontFamily:"inherit" }}>↻</button>
+    </div>
+
+    {loading
+      ? (
+        <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(248,113,113,0.35)", fontSize:13 }}>
+          Loading ships…
+        </div>
+      )
+
+      : ships.length === 0 ? (() => {
+
+          const { profiles } = getGeneratedProfiles({
+            query: search || "IIIT Hyderabad",
+            pageSize: 20
+          });
+
+          const fakeShips = profiles.map((p, i) => ({
+            id: "gen_ship_" + i,
+
+            person_a_name: p.couple_name?.split(" ")[0] || "Aarav",
+            person_b_name: p.couple_name?.split(" ").slice(-1)[0] || "Meera",
+
+            sails: p._seed_reactions?.["❤️"] || Math.floor(Math.random()*40 + 10),
+            sinks: Math.floor(Math.random() * 15),
+
+            vibe_tags: ["they look too good together", "same vibe"],
+
+            caption: "Lowkey something going on here 👀",
+
+            is_anonymous: true,
+            submitter_username: null,
+          }));
+
+          return fakeShips.map(ship => (
+            <ShipCard
+              key={ship.id}
+              ship={ship}
+              onVote={() => {}}
+              myVote={null}
+            />
+          ));
+
+        })()
+
+      : visibleShips.length === 0 && search ? (
+        <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(255,255,255,0.25)", fontSize:13 }}>
+          No ships match "{search}"
+        </div>
+      )
+
+      : visibleShips.map(ship => (
+        <ShipCard
+          key={ship.id}
+          ship={ship}
+          onVote={handleVote}
+          myVote={myVotes[ship.id] || null}
+        />
+      ))
+    }
+
+  </div>
+)}
 
     {/* ── NEW: CELEB SHIPS ── */}
     {tab === "celeb" && (
@@ -7435,92 +8309,14 @@ Discover
 </div>
 );
 }
-const PLACEHOLDER_COUPLES = [
-  {
-    id: "__p1", couple_name: "Aria & Zain", couple_type: "Romantic",
-    bond_score: 91, emotional_sync_score: 88, stability_score: 85, growth_index: 79,
-    partner_username: "@ariazain", locality: "London",
-    backstory: "Met at a midnight market. Never left.",
-    avatar_url: null, _isPlaceholder: true
-  },
-  {
-    id: "__p2", couple_name: "Maya & Dev", couple_type: "Long Distance",
-    bond_score: 84, emotional_sync_score: 79, stability_score: 88, growth_index: 72,
-    partner_username: "@mayadev", locality: "Mumbai / Toronto",
-    backstory: "3 timezones. One bond score.",
-    avatar_url: null, _isPlaceholder: true
-  },
-  {
-    id: "__p3", couple_name: "Sofía & Luca", couple_type: "Friends to Lovers",
-    bond_score: 76, emotional_sync_score: 82, stability_score: 71, growth_index: 88,
-    partner_username: "@sofialuca", locality: "Barcelona",
-    backstory: "10 years of 'just friends'. Then one honest conversation.",
-    avatar_url: null, _isPlaceholder: true
-  },
-  {
-    id: "__p4", couple_name: "Priya & Karan", couple_type: "Married",
-    bond_score: 94, emotional_sync_score: 91, stability_score: 96, growth_index: 82,
-    partner_username: "@priyakaran", locality: "Delhi",
-    backstory: "Arranged meeting. Unarranged falling.",
-    avatar_url: null, _isPlaceholder: true
-  },
-  {
-    id: "__p5", couple_name: "Jess & Theo", couple_type: "Situationship",
-    bond_score: 61, emotional_sync_score: 74, stability_score: 43, growth_index: 65,
-    partner_username: "@jesstheo", locality: "New York",
-    backstory: "We're not labelling it. But we're also not not labelling it.",
-    avatar_url: null, _isPlaceholder: true
-  },
-  {
-    id: "__p6", couple_name: "Amara & Felix", couple_type: "Engaged",
-    bond_score: 89, emotional_sync_score: 86, stability_score: 90, growth_index: 77,
-    partner_username: "@amarafelix", locality: "Lagos / Berlin",
-    backstory: "He proposed at the airport. Departure terminal. She missed the flight.",
-    avatar_url: null, _isPlaceholder: true
-  },
-  {
-    id: "__p7", couple_name: "Riya & Sam", couple_type: "Friends to Lovers",
-    bond_score: 73, emotional_sync_score: 80, stability_score: 68, growth_index: 91,
-    partner_username: "@riyasam", locality: "Bangalore",
-    backstory: "Two years of 'we're just study partners'.",
-    avatar_url: null, _isPlaceholder: true
-  },
-  {
-    id: "__p8", couple_name: "Nour & Aiden", couple_type: "Long Distance",
-    bond_score: 79, emotional_sync_score: 76, stability_score: 83, growth_index: 74,
-    partner_username: "@nouraiden", locality: "Cairo / Sydney",
-    backstory: "Met during a 6-hour layover. Decided it was worth the distance.",
-    avatar_url: null, _isPlaceholder: true
-  },
-  {
-    id: "__p9", couple_name: "Leila & Marco", couple_type: "Romantic",
-    bond_score: 88, emotional_sync_score: 85, stability_score: 80, growth_index: 93,
-    partner_username: "@leilamarco", locality: "Paris",
-    backstory: "Bonded over hating the same movie. Watched it again together anyway.",
-    avatar_url: null, _isPlaceholder: true
-  },
-  {
-    id: "__p10", couple_name: "Jin & Haruki", couple_type: "Married",
-    bond_score: 97, emotional_sync_score: 95, stability_score: 98, growth_index: 88,
-    partner_username: "@jinharuki", locality: "Seoul / Tokyo",
-    backstory: "11 years. Still send each other good morning texts first.",
-    avatar_url: null, _isPlaceholder: true
-  },
-  {
-    id: "__p11", couple_name: "Tanya & Rohan", couple_type: "Situationship",
-    bond_score: 57, emotional_sync_score: 69, stability_score: 40, growth_index: 61,
-    partner_username: "@tanyarohan", locality: "Mumbai",
-    backstory: "They said 'let's not overthink it'. They overthink it constantly.",
-    avatar_url: null, _isPlaceholder: true
-  },
-  {
-    id: "__p12", couple_name: "Zara & Elias", couple_type: "Romantic",
-    bond_score: 83, emotional_sync_score: 78, stability_score: 87, growth_index: 76,
-    partner_username: "@zaraelias", locality: "Dubai",
-    backstory: "Both reached for the last copy of the same book. Fought over it. Fell for each other.",
-    avatar_url: null, _isPlaceholder: true
-  },
-];
+// ============================================================
+// BOND OS — DETERMINISTIC PROFILE GENERATOR
+// Drop this into main_code_aon.jsx replacing PLACEHOLDER_COUPLES
+// FCP-safe: ~8KB, generates 75,000+ profiles on demand
+// ============================================================
+
+// ── 1. SEED DATA — institutions only, ~8KB total ──
+
 // ── Session feed cache (survives page refresh, clears on tab close) ─
 const FEED_CACHE_KEY = "bond_couple_feed_v1";
 const FEED_CACHE_TTL = 60_000; // 60 seconds
@@ -7609,9 +8405,13 @@ const [localMyReactions, setLocalMyReactions] = React.useState(() => {
     return saved ? JSON.parse(saved) : {};
   } catch { return {}; }
 });
-
 function handleLocalReact(coupleId, emoji) {
-  const EMOJIS = ["\u2764\uFE0F","\uD83D\uDE0D","\uD83D\uDD25","\uD83D\uDCAF","\uD83E\uDD79"];
+    // ensure guest uuid for placeholder couples too
+    if (!localStorage.getItem("bond_guest_uuid") && !localStorage.getItem("bond_anon_id")) {
+        localStorage.setItem("bond_guest_uuid", crypto.randomUUID ? crypto.randomUUID() : ("guest_" + Date.now()));
+    }
+
+  const EMOJIS = ["❤️","😍","🔥","💯","🥹"];
   const prev = localMyReactions[coupleId];
   const isSame = prev === emoji;
   const next = isSame ? null : emoji;
@@ -7632,9 +8432,11 @@ function handleLocalReact(coupleId, emoji) {
     localStorage.setItem("bond_placeholder_my_reactions", JSON.stringify(newMyR));
   } catch {}
 }
+
 React.useEffect(() => {
   let mounted = true;
   let retryTimer = null;
+
   async function fetchAll() {
     if (page === 0) {
       const cached = readFeedCache();
@@ -7643,61 +8445,72 @@ React.useEffect(() => {
         setReactions(cached.reactions);
         setMyReactions(cached.myReactions);
         setCommentCounts(cached.commentCounts);
+        setPhotoCounts(cached.photoCounts || {}); // ✅ FIX: restore photoCounts from cache
         setLoading(false);
         setRealLoaded(true);
       }
     }
-    setLoading(true);
-    if (!window.supabaseClient) { retryTimer = setTimeout(() => { if (mounted) fetchAll(); }, 300); return; }
-    setLoading(true);
+
+    setLoading(true); // ✅ FIX: removed duplicate setLoading(true) that was here before
+
+    if (!window.supabaseClient) {
+      retryTimer = setTimeout(() => { if (mounted) fetchAll(); }, 300);
+      return;
+    }
+
     try {
       let q = window.supabaseClient.from("couples")
         .select("id,couple_name,partner_username,couple_type,bond_score,emotional_sync_score,stability_score,growth_index,avatar_url,institution,locality,declared_by,created_at,social_links,backstory")
         .order("bond_score", { ascending: false })
         .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       if (filter !== "all") q = q.eq("couple_type", filter);
+
       const { data: cList, error: cErr } = await q;
       if (cErr) throw cErr;
+
       const safeList = cList || [];
       const ids = safeList.map(c => c.id);
       let allRxns = [], allComments = [], allPhotos = [];
+
       if (ids.length) {
         const [rxnRes, cmtRes, photoRes] = await Promise.all([
           window.supabaseClient.from("reactions")
             .select("target_id,user_id,reaction_type")
-            .eq("target_type","couple").in("target_id", ids),
+            .eq("target_type", "couple").in("target_id", ids),
           window.supabaseClient.from("couple_comments")
             .select("couple_id")
-            .eq("target_type","couple").in("couple_id", ids),
-          // ── NEW: community photo counts ──
+            .eq("target_type", "couple").in("couple_id", ids),
           window.supabaseClient.from("couple_community_photos")
             .select("couple_id")
             .in("couple_id", ids),
         ]);
-        allRxns    = rxnRes.data   || [];
-        allComments = cmtRes.data  || [];
-        allPhotos  = photoRes.data || [];
+        allRxns     = rxnRes.data   || [];
+        allComments = cmtRes.data   || [];
+        allPhotos   = photoRes.data || [];
       }
+
       if (!mounted) return;
+
       const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid");
       const rMap = {}, myMap = {}, cntMap = {}, photoMap = {};
+
       ids.forEach(id => {
         rMap[id] = {};
         EMOJIS.forEach(e => { rMap[id][e] = 0; });
         cntMap[id] = 0;
         photoMap[id] = 0;
       });
+
       allRxns.forEach(r => {
         if (rMap[r.target_id] && EMOJIS.includes(r.reaction_type)) {
           rMap[r.target_id][r.reaction_type] = (rMap[r.target_id][r.reaction_type] || 0) + 1;
           if (uid && r.user_id === uid) myMap[r.target_id] = r.reaction_type;
         }
       });
+
       allComments.forEach(c => { if (cntMap[c.couple_id] !== undefined) cntMap[c.couple_id]++; });
-      // ── NEW: tally photo counts ──
       allPhotos.forEach(p => { if (photoMap[p.couple_id] !== undefined) photoMap[p.couple_id]++; });
 
-      // Batch status check
       let statusSet = new Set();
       if (ids.length) {
         const { data: statusData } = await window.supabaseClient
@@ -7705,15 +8518,23 @@ React.useEffect(() => {
           .in("couple_id", ids).gt("expires_at", new Date().toISOString());
         (statusData || []).forEach(s => statusSet.add(s.couple_id));
       }
+
       setCouples(prev => page === 0 ? safeList : [...prev, ...safeList]);
       setHasMore(safeList.length === PAGE_SIZE);
       setReactions(rMap);
       setMyReactions(myMap);
       setCommentCounts(cntMap);
-      setPhotoCounts(photoMap); // ── NEW ──
+      setPhotoCounts(photoMap);
       setStatusIds(statusSet);
+
       if (page === 0) {
-        writeFeedCache({ couples: safeList, reactions: rMap, myReactions: myMap, commentCounts: cntMap });
+        writeFeedCache({
+          couples: safeList,
+          reactions: rMap,
+          myReactions: myMap,
+          commentCounts: cntMap,
+          photoCounts: photoMap, // ✅ FIX: was missing from cache write
+        });
       }
     } catch(err) {
       console.error("[CoupleFeed] fetch failed:", err);
@@ -7722,6 +8543,7 @@ React.useEffect(() => {
       if (mounted) { setLoading(false); setRealLoaded(true); }
     }
   }
+
   fetchAll();
   return () => { mounted = false; if (retryTimer) clearTimeout(retryTimer); };
 }, [filter, rankMode, refreshKey, page]);
@@ -7730,27 +8552,41 @@ const totalReactions = (id) => {
   const r = reactions[id] || {};
   return EMOJIS.reduce((s, e) => s + (r[e] || 0), 0);
 };
-
 const sorted = React.useMemo(() => {
   const arr = [...couples];
-  if (rankMode === "popular") return arr.sort((a,b) => totalReactions(b.id) - totalReactions(a.id));
-  if (rankMode === "rising") return arr
-    .filter(c => (Date.now() - new Date(c.created_at).getTime()) < 7*24*60*60*1000)
-    .sort((a,b) => (b.bond_score||0) - (a.bond_score||0));
+  if (rankMode === "popular") {
+    return arr.sort((a,b) => {
+      const ra = Object.values(reactions[a.id] || {}).reduce((s,v)=>s+v,0);
+      const rb = Object.values(reactions[b.id] || {}).reduce((s,v)=>s+v,0);
+      return rb - ra;
+    });
+  }
+  if (rankMode === "rising") {
+    // show newest 30 days sorted by bond score  
+    return arr
+      .filter(c => (Date.now() - new Date(c.created_at).getTime()) < 30*24*60*60*1000)
+      .sort((a,b) => (b.bond_score||0) - (a.bond_score||0));
+  }
+  // default: bond score
   return arr.sort((a,b) => (b.bond_score||0) - (a.bond_score||0));
 }, [couples, reactions, rankMode]);
 
 const visible = React.useMemo(() => {
   const q = search.trim().toLowerCase();
   if (!q) return sorted;
+  // Split query into words — ALL words must match somewhere (fuzzy AND logic)
+  // "iit mumbai" → both "iit" and "mumbai" must appear
+  // "bombay" → matches "IIT Bombay" even though query isn't exact
+  const qWords = q.split(/\s+/).filter(w => w.length >= 2);
   return sorted.filter(c => {
-    const tokens = [
+    const haystack = [
       c.couple_name, c.partner_username, c.partner1_name, c.partner2_name,
-      c.couple_type, c.institution, c.locality,
-      c.declared_by === "partner"  ? "self-declared" : null,
-      c.declared_by === "outsider" ? "nominated"     : null,
-    ].filter(Boolean).map(v => v.toLowerCase());
-    return tokens.some(t => t.includes(q));
+      c.couple_type, c.institution, c.locality, c.backstory,
+      c.declared_by === "partner" ? "self-declared" : null,
+      c.declared_by === "outsider" ? "nominated" : null,
+    ].filter(Boolean).join(" ").toLowerCase();
+    // Every query word must appear somewhere in the haystack
+    return qWords.every(word => haystack.includes(word));
   });
 }, [sorted, search]);
 
@@ -7771,8 +8607,7 @@ async function recomputeEngagementScore(coupleId) {
 }
 
 async function handleReact(coupleId, emoji) {
-  const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid");
-  if (!uid) return;
+const uid = window.currentUser?.id || ensureGuestUUID();
   const prev = myReactions[coupleId];
   const isSame = prev === emoji;
   const next = isSame ? null : emoji;
@@ -7862,58 +8697,42 @@ return (
 {(() => {
   // Still fetching — show blurred shimmer placeholders
   if (!realLoaded && visible.length === 0) {
-    return (
-      <div style={{ position:"relative" }}>
-        <div style={{
-          position:"absolute", inset:0, zIndex:1,
-          background:"linear-gradient(180deg, transparent 55%, rgba(2,6,23,0.9) 100%)",
-          pointerEvents:"none", borderRadius:18
-        }} />
-        {PLACEHOLDER_COUPLES.map(c => (
-          <div key={c.id} style={{ opacity:0.38, filter:"blur(0.6px)",
-            pointerEvents:"none", transform:"scale(0.99)", marginBottom:10 }}>
-            <CoupleCard couple={c} rank={0} total={0}
-              reactions={{}} myReaction={null} commentCount={0}
-              communityPhotoCount={0} hasStatus={false}
-              onReact={() => {}} onSelect={() => {}} />
-          </div>
-        ))}
-        <div style={{
-          position:"absolute", bottom:16, left:0, right:0, zIndex:2,
-          textAlign:"center", fontSize:11, color:"rgba(248,113,113,0.55)",
-          fontWeight:600, letterSpacing:"0.06em"
-        }}>
-          Loading live couples…
-        </div>
-      </div>
-    );
-  }
+  return (
+    <div style={{ textAlign:"center", padding:"60px 0", color:"rgba(248,113,113,0.4)" }}>
+      Loading couples…
+    </div>
+  );
+}
 
   // ── LOADED BUT DB IS EMPTY → show placeholder couples as real full cards ──
-  if (realLoaded && visible.length === 0 && !search.trim()) {
-    return (
-      <div>
-        {/* Banner so users know these are examples */}
-     
-{PLACEHOLDER_COUPLES.map((c, i) => (
-  <div key={c.id} className="bond-fade-up" style={{ animationDelay:`${i * 35}ms` }}>
-    <CoupleCard
-      couple={c}
-      rank={i + 1}
-      total={PLACEHOLDER_COUPLES.length}
-      reactions={localReactions[c.id] || {}}         // ← was {}
-      myReaction={localMyReactions[c.id] || null}    // ← was null
-      commentCount={0}
-      communityPhotoCount={0}
-      hasStatus={false}
-      onReact={(emoji) => handleLocalReact(c.id, emoji)}  // ← was () => {}
-      onSelect={(c) => setSelectedCouple(c)}
-    />
-  </div>
-))}
-      </div>
-    );
-  }
+
+if (realLoaded && visible.length === 0 && !search.trim()) {
+
+  const { profiles } = getGeneratedProfiles({
+    page,
+    pageSize: 20,
+    query: search,
+    coupleTypeFilter: filter
+  });
+
+  return profiles.map((c, i) => (
+    <div key={c.id} className="bond-fade-up" style={{ animationDelay:`${i * 35}ms` }}>
+      <CoupleCard
+        couple={c}
+        rank={i + 1}
+        total={profiles.length}
+        reactions={c._seed_reactions || {}}
+        myReaction={null}
+        commentCount={c._seed_comment_count || 0}
+        communityPhotoCount={c._seed_photo_count || 0}
+        hasStatus={false}
+        onReact={(emoji) => handleLocalReact(c.id, emoji)}
+        onSelect={(c) => setSelectedCouple(c)}
+      />
+    </div>
+  ));
+}
+  
 
   // Search returned nothing
   if (realLoaded && visible.length === 0 && search.trim()) {
@@ -8059,19 +8878,6 @@ if (!error && row?.id) {
 setComments(p => [...p, row]);
 // Trigger score recompute for outsider couples
 if (targetType === "couple") {
-try {
-const res = await fetch(
-  `${window.SUPABASE_URL}/functions/v1/api-feed?filter=${filter}&page=${page}`,
-  { headers: { "Authorization": `Bearer ${window.SUPABASE_ANON_KEY}` } }
-);
-const { data: couples } = await res.json();
-if (coup?.declared_by === "outsider") {
-const { data: rxns } = await window.supabaseClient.from("reactions").select("id").eq("target_type","couple").eq("target_id", targetId);
-const { data: cmts } = await window.supabaseClient.from("couple_comments").select("id").eq("couple_id", targetId).eq("target_type","couple");
-const newScore = Math.min(Math.round(50 + (rxns?.length||0)*0.5 + (cmts?.length||0)*1.5), 95);
-await window.supabaseClient.from("couples").update({ bond_score: newScore, last_computed_at: new Date().toISOString() }).eq("id", targetId);
-}
-} catch(e) { console.warn("[comment score] update failed", e); }
 }
 }
 setText(""); setPosting(false);
@@ -8128,15 +8934,8 @@ const [uploading, setUploading] = React.useState(false);
 const [caption, setCaption] = React.useState("");
 const [imgData, setImgData] = React.useState(null);
 const [showUpload, setShowUpload] = React.useState(false);
-function handleFile(e) {
-const file = e.target.files?.[0];
-if (!file) return;
-if (file.size > 5 * 1024 * 1024) { alert("Photo must be under 5MB"); return; }
-setImgFile(file);                         // store actual file
-const reader = new FileReader();
-reader.onload = () => setImgData(reader.result); // preview only
-reader.readAsDataURL(file);
-}
+const [imgFile, setImgFile] = React.useState(null);
+const [proofImg, setProofImg] = React.useState(null);
 React.useEffect(() => {
 let mounted = true;
 async function load() {
@@ -8152,13 +8951,16 @@ load();
 return () => { mounted = false; };
 }, [coupleId]);
 
+const [proofFile, setProofFile] = React.useState(null); // ADD THIS STATE
+
 function handleFile(e) {
-const file = e.target.files?.[0];
-if (!file) return;
-if (file.size > 3 * 1024 * 1024) { alert("Photo must be under 3MB"); return; }
-const reader = new FileReader();
-reader.onload = () => setImgData(reader.result);
-reader.readAsDataURL(file);
+  const file = e.target.files?.[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) { alert("Photo must be under 2MB"); return; }
+  setImgFile(file);
+  const reader = new FileReader();
+  reader.onload = () => setImgData(reader.result);
+  reader.readAsDataURL(file);
 }
 async function uploadStatus() {
 if (!imgFile) return;
@@ -8328,6 +9130,22 @@ return (
 // ============================================================
 
 function CoupleDetailModal({ couple, onClose }) {
+  const scrollRef = React.useRef(null);
+const touchStartY = React.useRef(null);
+
+const handleTouchStart = (e) => {
+  touchStartY.current = e.touches[0].clientY;
+};
+
+const handleTouchEnd = (e) => {
+  if (touchStartY.current === null) return;
+  const delta = e.changedTouches[0].clientY - touchStartY.current;
+  if (delta > 80) onClose(); // swipe down > 80px = close
+  touchStartY.current = null;
+};
+React.useEffect(() => {
+  if (scrollRef.current) scrollRef.current.scrollTop = 0;
+}, [couple.id]);
 const STORY_QUESTIONS = [
   { key:"how_met",        q:"How did you two actually meet?" },
   { key:"first_noticed",  q:"First thing you noticed about them?" },
@@ -8465,19 +9283,43 @@ const dedupedChallenges = challenges.filter(c => {
 });
 
 return (
-  <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:1000,
-    background:"rgba(0,0,0,0.75)", backdropFilter:"blur(8px)",
-    display:"flex", alignItems:"flex-end", justifyContent:"center", padding:"0" }}>
-    <div onClick={e => e.stopPropagation()}
-      style={{ width:"100%", maxWidth:480, maxHeight:"92vh", overflowY:"auto",
-        borderRadius:"24px 24px 0 0", background:"#0e0e12",
-        border:"1px solid rgba(255,255,255,0.08)", borderBottom:"none",
-        animation:"bond-fade-up 0.28s ease" }}>
-
+<div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:1000,
+  background:"rgba(0,0,0,0.75)", backdropFilter:"blur(8px)",
+  display:"flex", alignItems:"flex-end", justifyContent:"center",
+  overflow:"hidden",
+  padding:"0" }}>
+<div onClick={e => e.stopPropagation()}
+onTouchStart={handleTouchStart}
+onTouchEnd={handleTouchEnd}
+  ref={scrollRef}
+  style={{
+    width:"100%",
+    maxWidth:480,
+    maxHeight:"92vh",
+    overflowY:"auto",
+    WebkitOverflowScrolling:"touch",
+    borderRadius:"24px 24px 0 0",
+    background:"#0e0e12",
+    border:"1px solid rgba(255,255,255,0.08)",
+    borderBottom:"none",
+    animation:"bond-fade-up 0.28s ease",
+    position:"relative",
+  }}>
       {/* Drag handle */}
-      <div style={{ display:"flex", justifyContent:"center", padding:"12px 0 4px" }}>
-        <div style={{ width:36, height:4, borderRadius:999, background:"rgba(255,255,255,0.12)" }} />
-      </div>
+    {/* Drag handle — tap to close */}
+<div style={{ padding: "0 20px 20px",
+  borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 14 }}>
+  <button onClick={onClose}
+    style={{ width: "100%", padding: "13px", borderRadius: 14,
+      background: "linear-gradient(135deg,rgba(248,113,113,0.12),rgba(251,146,60,0.08))",
+      border: "1px solid rgba(248,113,113,0.2)",
+      color: "#fca5a5", fontSize: 14, fontWeight: 700,
+      cursor: "pointer", fontFamily: "inherit",
+      display: "flex", alignItems: "center",
+      justifyContent: "center", gap: 8 }}>
+    <span>↓</span> Close
+  </button>
+</div>
 
       {/* Active statuses */}
       <CoupleStatus coupleId={couple.id} isOwner={false} />
@@ -8931,6 +9773,51 @@ const percentile = total > 1 ? Math.round(((total - rank + 1) / total) * 100) : 
 const isTop3 = rank <= 3;
 const displayName = couple.couple_name || couple.partner_username || "Anonymous";
 const [showComments, setShowComments] = React.useState(false);
+// ✅ ADD THIS
+const isPlaceholder = couple._isPlaceholder;
+
+// Deterministic seed for any card (real or placeholder) with 0 interactions
+const _getSeed = React.useMemo(() => {
+  let h = 0;
+  const str = String(couple.id);
+  for (let i = 0; i < str.length; i++) {
+    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  }
+  const rng = () => {
+    h = (Math.imul(h ^ (h >>> 16), 0x45d9f3b)) | 0;
+    h = (Math.imul(h ^ (h >>> 16), 0x45d9f3b)) | 0;
+    return ((h ^ (h >>> 16)) >>> 0) / 0xffffffff;
+  };
+  const virality = rng();
+  let total;
+  if      (virality > 0.92) total = Math.floor(rng() * 3000) + 800;
+  else if (virality > 0.78) total = Math.floor(rng() * 400)  + 80;
+  else if (virality > 0.50) total = Math.floor(rng() * 80)   + 18;
+  else                      total = Math.floor(rng() * 20)   + 4;
+
+  const _emojis = ["❤️","😍","🔥","💯","🥹"];
+  const rxns = {};
+  let rem = total;
+  const shares = _emojis.map(() => rng());
+  const tot = shares.reduce((a, b) => a + b, 0);
+  _emojis.forEach((e, i) => {
+    const alloc = i < _emojis.length - 1
+      ? Math.floor((shares[i] / tot) * total)
+      : rem;
+    rxns[e] = Math.max(0, alloc);
+    rem -= rxns[e];
+  });
+  const commentCount = Math.max(1, Math.floor(total * (0.05 + rng() * 0.10) + rng() * 6));
+  return { rxns, commentCount };
+}, [couple.id]);
+
+const rawReactions = isPlaceholder ? (couple._seed_reactions || {}) : reactions;
+const rawCommentCount = isPlaceholder ? (couple._seed_comment_count || 0) : commentCount;
+
+const hasRealData = EMOJIS.reduce((s, e) => s + (rawReactions[e] || 0), 0) > 0;
+
+const finalReactions    = hasRealData ? rawReactions    : _getSeed.rxns;
+const finalCommentCount = (rawCommentCount > 0) ? rawCommentCount : _getSeed.commentCount;
 
 const RANK_COLORS = {
   1: { border:"rgba(251,191,36,0.35)",  accent:"#fbbf24", crown:"\uD83D\uDC51" },
@@ -8950,7 +9837,7 @@ const TYPE_COLORS = {
 const tc = TYPE_COLORS[couple.couple_type] || { bg:"rgba(255,255,255,0.06)", color:"rgba(255,255,255,0.4)" };
 const bondColor = bond >= 80 ? "#34d399" : bond >= 55 ? "#f87171" : "#6b7280";
 const locationLabel = [couple.institution, couple.locality].filter(Boolean).join(" · ");
-const totalRxns = EMOJIS.reduce((s, e) => s + (reactions[e] || 0), 0);
+const totalRxns = EMOJIS.reduce((s, e) => s + (finalReactions[e] || 0), 0);
 
 return (
   <div style={{ borderRadius:18, marginBottom:10, overflow:"hidden",
@@ -9047,7 +9934,7 @@ return (
       {/* Emoji reactions */}
       <div style={{ display:"flex", gap:6, marginBottom:12, justifyContent:"space-between" }}>
         {EMOJIS.map(emoji => {
-          const count = reactions[emoji] || 0;
+          const count = finalReactions[emoji] || 0;
           const active = myReaction === emoji;
           return (
             <button key={emoji} onClick={() => onReact(emoji)}
@@ -9058,8 +9945,10 @@ return (
                 cursor:"pointer", transition:"all 0.15s",
                 transform: active ? "scale(1.08)" : "scale(1)" }}>
               <span style={{ fontSize:18, lineHeight:1 }}>{emoji}</span>
-              <span style={{ fontSize:10, fontWeight:700,
-                color: active ? "#fca5a5" : "rgba(255,255,255,0.3)" }}>{count > 0 ? count : ""}</span>
+          <span style={{ fontSize:10, fontWeight:700,
+color: active ? "#fca5a5" : "rgba(255,255,255,0.3)" }}>
+{count >= 1000 ? (count/1000).toFixed(1)+"k" : count}
+</span>
             </button>
           );
         })}
@@ -9068,11 +9957,12 @@ return (
       {/* Bottom row: reactions count + spotted badge + comment btn */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
         <div style={{ display:"flex", alignItems:"center", gap:8, flex:1 }}>
-          {totalRxns > 0 && (
-            <div style={{ fontSize:11, color:"rgba(255,255,255,0.2)" }}>
-              {totalRxns} reaction{totalRxns !== 1 ? "s" : ""}
-            </div>
-          )}
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.2)", minWidth:60 }}>
+  {totalRxns > 0
+    ? `${totalRxns >= 1000 ? (totalRxns/1000).toFixed(1)+"k" : totalRxns} reaction${totalRxns !== 1 ? "s" : ""}`
+    : "0 reactions"
+  }
+</div>
           {/* ── NEW: Community spotted badge ── */}
           {communityPhotoCount > 0 && (
             <span style={{ fontSize:11, padding:"3px 9px", borderRadius:999,
@@ -9091,7 +9981,7 @@ return (
           <span style={{ fontSize:13 }}>💬</span>
           <span style={{ fontSize:12, fontWeight:600,
             color: showComments ? "#fca5a5" : "rgba(255,255,255,0.4)" }}>
-            {commentCount > 0 ? commentCount : "Comment"}
+          {finalCommentCount > 0 ? finalCommentCount : "Comment"}
           </span>
         </button>
       </div>
@@ -9173,6 +10063,7 @@ const [saving, setSaving] = React.useState(false);
 const [error,      setError]      = React.useState("");
 const [avatarUploading, setAvatarUploading] = React.useState(false);
 const [avatarFile, setAvatarFile] = React.useState(null); // ← ADD
+const avatarUploadedUrl = React.useRef(null); // ADD THIS
 
 const coupleName = name1.trim() && name2.trim()
 ? `${name1.trim()} & ${name2.trim()}`
@@ -9191,38 +10082,44 @@ stability_score:      Math.round(+stability * 10),
 growth_index:         Math.round(+growth * 10),
 };
 }
-const [editAvatarFile, setEditAvatarFile] = React.useState(null);
+
 
 function handlePhoto(e) {
-const file = e.target.files?.[0];
-if (!file) return;
-if (file.size > 5 * 1024 * 1024) { alert("Photo must be under 5MB"); return; }
-setAvatarFile(file); // ← store file ref for save() to use
-// Show local preview immediately
-const reader = new FileReader();
-reader.onload = () => setAvatar(reader.result); // local base64 preview only
-reader.readAsDataURL(file);
-// Also kick off background upload — save() will await it properly if needed
-setAvatarUploading(true);
-compressImage(file).then(compressed =>
-uploadToStorage("avatars", compressed, "couples/")
-).then(url => {
-if (url) setAvatar(url); // replace preview with real Supabase URL
-setAvatarUploading(false);
-});
+  const file = e.target.files?.[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { alert("Photo must be under 5MB"); return; }
+  setAvatarFile(file);
+  const reader = new FileReader();
+  reader.onload = () => setAvatar(reader.result); // preview only
+  reader.readAsDataURL(file);
+  setAvatarUploading(true);
+  compressImage(file).then(compressed =>
+    uploadToStorage("avatars", compressed, "couples/")
+  ).then(url => {
+    if (url) {
+      setAvatar(url);
+      avatarUploadedUrl.current = url; // store final URL in ref
+    }
+    setAvatarUploading(false);
+  });
 }
 async function save() {
 if (!answers.duration) { setError("Pick how long you've been together."); return; }
 setSaving(true); setError("");
 
 // Wait for avatar upload if still in progress
-if (avatarFile && avatarUploading) {
-const compressed = await compressImage(avatarFile, 800, 0.8);
-const url = await uploadToStorage("avatars", compressed, "couples/");
-if (url) setAvatar(url);
-setAvatarUploading(false);
+// Wait for background upload to finish if still running
+// Wait for avatar upload using ref instead of stale state
+if (!avatarUploadedUrl.current && avatarFile) {
+  await new Promise(resolve => {
+    const check = setInterval(() => {
+      if (avatarUploadedUrl.current) { clearInterval(check); resolve(); }
+    }, 200);
+    setTimeout(() => { clearInterval(check); resolve(); }, 8000);
+  });
 }
-
+// Use the URL that handlePhoto already uploaded
+const finalAvatarUrl = avatarUploadedUrl.current || avatar;
 const session = await window.supabaseClient.auth.getSession();
 const token = session?.data?.session?.access_token ?? window.SUPABASE_ANON_KEY;
 
@@ -9239,7 +10136,7 @@ const res = await fetch(`${window.SUPABASE_URL}/functions/v1/api-couples`, {
     "Authorization": `Bearer ${token}`,
   },
   body: JSON.stringify({
-    name1, name2, avatar, declaredBy, coupleType,
+    name1, name2, finalAvatarUrl, declaredBy, coupleType,
     answers, institution, locality, socialLinks, backstory,
     scores: computeScores(),
     guestId,
@@ -9842,20 +10739,19 @@ return false;
 if (alreadyDone) { setCompleting(null); return; }
 const session = await window.supabaseClient.auth.getSession();
 const token = session?.data?.session?.access_token ?? window.SUPABASE_ANON_KEY;
-const res = await fetch(`${window.SUPABASE_URL}/functions/v1/api-statuses`, {
-method: "POST",
-headers: {
-"Content-Type": "application/json",
-"Authorization": `Bearer ${token}`
-},
-body: JSON.stringify({
-coupleId,
-imageUrl: url,
-caption: caption.trim() || null,
-}),
-});
-const data = await res.json();
-const error = res.ok ? null : data;
+const { data: row, error } = await window.supabaseClient
+  .from("couple_challenges")
+  .insert({
+    couple_id: couple.id,
+    challenge_key: ch.key,
+    completed_by: uid || null,
+    xp_awarded: ch.xp,
+    proof_url: proofUrl || null,
+    proof_note: proofNote || null,
+    completed_at: now.toISOString(),
+  })
+  .select()
+  .single();
 if (error) { console.warn("[challenge] insert failed:", error); setCompleting(null); return; }
 if (row) {
 const updated = [...completedChallenges, row];
@@ -10133,6 +11029,7 @@ const [showHint, setShowHint] = React.useState(false);
 const [showProof, setShowProof] = React.useState(false);
 const [proofImg, setProofImg] = React.useState(null);
 const [proofNote, setProofNote] = React.useState("");
+const [proofFile, setProofFile] = React.useState(null);
 const [submitting, setSubmitting] = React.useState(false);
 
 const needsProof = ["once_photo","rom_weekly_date","rom_weekly_cook","rom_once_surprise",
@@ -10140,21 +11037,33 @@ const needsProof = ["once_photo","rom_weekly_date","rom_weekly_cook","rom_once_s
 "ftl_weekly_roots","ftl_once_origin","mar_weekly_memory"].includes(ch.key);
 
 function handleFile(e) {
-const file = e.target.files?.[0];
-if (!file) return;
-if (file.size > 2 * 1024 * 1024) { alert("Photo must be under 2MB"); return; }
-const reader = new FileReader();
-reader.onload = () => setProofImg(reader.result);
-reader.readAsDataURL(file);
+  const file = e.target.files?.[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) { alert("Photo must be under 2MB"); return; }
+  setProofFile(file);
+  const reader = new FileReader();
+  reader.onload = () => setProofImg(reader.result);
+  reader.readAsDataURL(file);
 }
-
 async function submitWithProof() {
-setSubmitting(true);
-await onComplete(proofImg, proofNote.trim() || null);
-setShowProof(false);
-setProofImg(null);
-setProofNote("");
-setSubmitting(false);
+  setSubmitting(true);
+  let uploadedUrl = null;
+  
+  if (proofFile) {
+    try {
+      const compressed = await compressImage(proofFile, 800, 0.8);
+      uploadedUrl = await uploadToStorage("bond-uploads", compressed, "proofs/");
+    } catch(e) {
+      console.warn("[proof upload] failed", e);
+    }
+  }
+  
+  await onComplete(uploadedUrl, proofNote.trim() || null);
+  setShowProof(false);
+  setProofImg(null);
+  setProofFile(null); // clear file ref too
+  setProofNote("");
+  setSubmitting(false);
 }
 
 function handleDoneClick() {
@@ -10299,7 +11208,43 @@ if (!couple) return (
 );
 return <MyCoupleProfile couple={couple} onUpdate={setCouple} defaultTab="challenges" />;
 }
+// ── Deterministic fake stats for posts with 0 real reactions ──
+function seedPostStats(postId) {
+  // Hash the post ID into a stable number
+  let h = 0;
+  const str = String(postId);
+  for (let i = 0; i < str.length; i++) {
+    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  }
+  const rng = () => {
+    h = (Math.imul(h ^ (h >>> 16), 0x45d9f3b)) | 0;
+    h = (Math.imul(h ^ (h >>> 16), 0x45d9f3b)) | 0;
+    return ((h ^ (h >>> 16)) >>> 0) / 0xffffffff;
+  };
 
+  const virality = rng();
+  let total;
+  if      (virality > 0.90) total = Math.floor(rng() * 800)  + 200;  // hot
+  else if (virality > 0.70) total = Math.floor(rng() * 120)  + 30;   // decent
+  else if (virality > 0.40) total = Math.floor(rng() * 40)   + 8;    // normal
+  else                      total = Math.floor(rng() * 12)   + 2;    // quiet
+
+  const emojis = ["🔥","💞","😭","👀","✨"];
+  const rxns = {};
+  let rem = total;
+  const shares = emojis.map(() => rng());
+  const tot = shares.reduce((a, b) => a + b, 0);
+  emojis.forEach((e, i) => {
+    const alloc = i < emojis.length - 1
+      ? Math.floor((shares[i] / tot) * total)
+      : rem;
+    rxns[e] = Math.max(0, alloc);
+    rem -= rxns[e];
+  });
+
+  const commentCount = Math.max(1, Math.floor(total * (0.05 + rng() * 0.10) + rng() * 5));
+  return { rxns, commentCount };
+}
 function SocialHub() {
   const { user, profile, loading } = useSocial();
   const [tab, setTab] = React.useState("feed");
@@ -10522,7 +11467,4110 @@ className={`px-5 py-2 rounded-xl text-sm transition ${
 </button>
 );
 }
+const InstaLoginPage = () => (
+  <div style={{
+    minHeight: "100vh",
+    background: "radial-gradient(ellipse at top, #0d1424 0%, #020617 100%)",
+    display: "flex", flexDirection: "column",
+    alignItems: "center", justifyContent: "center",
+    padding: "24px", textAlign: "center", color: "white",
+    fontFamily: "sans-serif"
+  }}>
+    <div style={{ fontSize: "48px", marginBottom: "16px" }}>🔗</div>
+    <h1 style={{ fontSize: "22px", fontWeight: "700", marginBottom: "12px" }}>
+      Open in Safari to Continue
+    </h1>
+    <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.5)",
+      marginBottom: "32px", lineHeight: "1.6" }}>
+      Bond OS doesn't work inside Instagram's browser.<br/>
+      Tap below to open in Safari for the full experience.
+    </p>
+    <button
+      onClick={() => { window.location.href = "https://bondos.in"; }}
+      style={{
+        background: "linear-gradient(135deg, #f87171, #fb923c)",
+        border: "none", borderRadius: "24px",
+        padding: "14px 32px", color: "white",
+        fontSize: "15px", fontWeight: "600", cursor: "pointer"
+      }}
+    >
+      Open bondos.in in Safari →
+    </button>
+    <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.25)", marginTop: "24px" }}>
+      Tap ··· then "Open in Safari" if button doesn't work
+    </p>
+  </div>
+);
+// ─────────────────────────────────────────────
+// CHARACTER CHECK — constants
+// ─────────────────────────────────────────────
 
+const CC_ANIMALS = [
+  { emoji: "🦁", label: "Lion" },      { emoji: "🐺", label: "Wolf" },
+  { emoji: "🦊", label: "Fox" },       { emoji: "🐻", label: "Bear" },
+  { emoji: "🦋", label: "Butterfly" }, { emoji: "🐬", label: "Dolphin" },
+  { emoji: "🦅", label: "Eagle" },     { emoji: "🐢", label: "Turtle" },
+  { emoji: "🦄", label: "Unicorn" },   { emoji: "🐙", label: "Octopus" },
+  { emoji: "🦔", label: "Hedgehog" },  { emoji: "🐺", label: "Husky" },
+  { emoji: "🦚", label: "Peacock" },   { emoji: "🐘", label: "Elephant" },
+  { emoji: "🦝", label: "Raccoon" },   { emoji: "🐆", label: "Leopard" },
+];
+
+const CC_RATING_QUESTIONS = [
+  { id: "vibe",      label: "Overall vibe",          max: 5 },
+  { id: "real",      label: "Authenticity",           max: 5 },
+  { id: "reliable",  label: "Reliability",            max: 7 },
+  { id: "emotional", label: "Emotional availability", max: 5 },
+  { id: "fun",       label: "Fun to be around",       max: 5 },
+];
+
+const CC_PILL_QUESTIONS = [
+  { id: "sorted",   q: "How sorted are they day-to-day?",        options: ["Pure chaos 🌀","Pretty messy","Balanced","Very sorted","Eerily organised 📋"] },
+  { id: "open",     q: "How open are they with people?",         options: ["Tells everyone everything","Pretty open","Selectively open","Guarded","Hard to read 🌫️"] },
+  { id: "hype",     q: "Hype machine or truth-teller?",          options: ["Full hype 📣","Mostly encouraging","Both equally","Leans honest","Always straight 🪞"] },
+  { id: "energy",   q: "Social energy when you're around them?", options: ["Drains you 🪫","Somewhat draining","Neutral","Gives energy","Endless energy ⚡"] },
+  { id: "showup",   q: "When it matters most, do they show up?", options: ["Rarely 💨","Sometimes","Usually","Almost always","Every single time 📍"] },
+  { id: "conflict", q: "How do they handle conflict?",           options: ["Avoids it","Gets defensive","Fixes it fast","Calm & direct","Handles it maturely 🤝"] },
+  { id: "memory",   q: "Do they remember things about you?",     options: ["Forgets everything","Remembers some","Usually remembers","Remembers details","Remembers everything 🧠"] },
+];
+
+const CC_ARCHETYPES = [
+  { label: "The Fixer", emoji: "🔧" },     { label: "Safe House", emoji: "🏠" },
+  { label: "Chaos Agent", emoji: "🌀" },   { label: "Hype Machine", emoji: "📣" },
+  { label: "The Real One", emoji: "🪞" },  { label: "Quiet Anchor", emoji: "⚓" },
+  { label: "Wildcard", emoji: "🃏" },      { label: "Main Character", emoji: "🎬" },
+  { label: "The Therapist", emoji: "🛋️" }, { label: "Social Glue", emoji: "🫂" },
+];
+
+const CC_GREEN_FLAGS = [
+  "Remembers small things","Shows up without being asked","Low drama",
+  "Keeps secrets","Checks in randomly","Defends you when you're not there",
+  "Apologises first","Celebrates your wins","Respects boundaries",
+];
+
+const CC_RED_FLAGS = [
+  "Goes MIA","Flaky under pressure","Makes it about them",
+  "Hot and cold energy","Disappears when things get real",
+  "Competitive about wrong things","Overpromises",
+];
+
+// ─────────────────────────────────────────────
+// RATING ROW — dot-style
+// ─────────────────────────────────────────────
+function RatingInput({ max, value, onChange }) {
+const isComplete = value === max;
+return (
+  <div style={{ display: "flex", gap: max > 5 ? 5 : 7, flexWrap: "wrap", alignItems: "center" }}>
+    {Array.from({ length: max }, (_, i) => i + 1).map(n => {
+      const active = n <= value;
+      const bg = active
+        ? isComplete ? "#10B981" : "#0A66C2"
+        : "transparent";
+      const border = active
+        ? isComplete ? "1.5px solid #10B981" : "1.5px solid #0A66C2"
+        : "1.5px solid rgba(255,255,255,0.30)";
+      return (
+        <button key={n} onClick={() => onChange(n === value ? 0 : n)}
+          style={{
+            width: max > 5 ? 30 : 34, height: max > 5 ? 30 : 34,
+            borderRadius: max > 5 ? 8 : "50%",
+            border,
+            background: bg,
+            color: active ? "#fff" : "rgba(255,255,255,0.65)",
+            fontWeight: 700, fontSize: 13, cursor: "pointer",
+            transition: "all 0.14s", fontFamily: "inherit", flexShrink: 0,
+            transform: active ? "scale(1.08)" : "scale(1)",
+          }}>{n}</button>
+      );
+    })}
+  </div>
+);
+}
+function CharacterReviewForm({ targetUsername, onBack, onDone }) {
+  const [ratings, setRatings]         = React.useState({});
+  const [pillAnswers, setPillAnswers] = React.useState({});
+  const [archetype, setArchetype]     = React.useState(null);
+  const [animal, setAnimal]           = React.useState(null);
+  const [greenPicks, setGreenPicks]   = React.useState([]);
+  const [redPicks, setRedPicks]       = React.useState([]);
+  const [quoteLine, setQuoteLine]     = React.useState("");
+  const [secretLine, setSecretLine]   = React.useState("");
+  const [isAnon, setIsAnon]           = React.useState(true);
+  const [submitting, setSubmitting]   = React.useState(false);
+  const [done, setDone]               = React.useState(false);
+  const [error, setError]             = React.useState(null);
+
+  const toggle = (arr, set, val, max) =>
+    arr.includes(val)
+      ? set(arr.filter(v => v !== val))
+      : arr.length < max ? set([...arr, val]) : null;
+
+  const filledRatings = CC_RATING_QUESTIONS.filter(q => (ratings[q.id] || 0) > 0).length;
+  const filledPills   = CC_PILL_QUESTIONS.filter(q => pillAnswers[q.id]).length;
+  const canSubmit     = filledRatings >= 3 && filledPills >= 4 && !!archetype && quoteLine.trim().length > 5;
+
+  const progressDots = [
+    filledRatings >= 3,
+    filledPills   >= 4,
+    !!archetype,
+    !!animal,
+    quoteLine.trim().length > 5,
+  ];
+
+  const handleSubmit = async () => {
+    if (!canSubmit || submitting) return;
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      // ── 1. Get session directly — works on mobile Safari ──
+      const { data: { session } } = await window.supabaseClient.auth.getSession();
+      const authedUser = session?.user || window.currentUser || null;
+
+      // ── 2. Resolve uid ──
+      let uid = authedUser?.id || localStorage.getItem("bond_guest_uuid") || null;
+      if (!uid) {
+        uid = "guest_" + Date.now();
+        localStorage.setItem("bond_guest_uuid", uid);
+      }
+
+      // ── 3. Resolve reviewer username ──
+      const reviewerUsername = isAnon ? null : (
+        authedUser?.user_metadata?.preferred_username ||
+        authedUser?.user_metadata?.user_name ||
+        localStorage.getItem("bond_username") ||
+        authedUser?.email?.split("@")[0] ||
+        null
+      );
+
+      // ── 4. Merge answers ──
+      const answers = { ...ratings, ...pillAnswers };
+
+      // ── 5. Build payload ──
+  const payload = {
+  target_username:   targetUsername,
+  reviewer_id:       uid,          // ← was: isAnon ? null : (authedUser?.id || null)
+  reviewer_username: isAnon ? null : reviewerUsername,
+  is_anonymous:      isAnon,
+  answers,
+  archetype,
+  animal,
+  green_flags:  greenPicks,
+  red_flags:    redPicks,
+  quote_line:   quoteLine.trim(),
+  secret_line:  secretLine.trim() || null,
+  created_at:   new Date().toISOString(),
+};
+      // ── 6. Use session token if available, fall back to anon key ──
+      const token = session?.access_token || window.SUPABASE_ANON_KEY;
+
+      const res = await fetch(
+        `${window.SUPABASE_URL}/rest/v1/character_reviews`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":  "application/json",
+            "apikey":        window.SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${token}`,
+            "Prefer":        "return=minimal",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error("[CharacterReview] insert failed:", res.status, errText);
+        throw new Error(errText);
+      }
+
+      // ── 7. Recompute metrics ──
+      await updateProfileMetrics(targetUsername);
+
+      setDone(true);
+
+    } catch (e) {
+      console.error("[CharacterReview] submit crashed:", e);
+      setError("Couldn't save your review. Please try again.");
+    }
+
+    setSubmitting(false);
+  };
+
+  const card = {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(10,102,194,0.35)",
+    borderRadius: 20, padding: "18px 16px", marginBottom: 10,
+    boxShadow: "0 0 0 1px rgba(10,102,194,0.08)",
+  };
+
+  const secTitle = (text, sub) => (
+    <div style={{ marginBottom: 16 }}>
+      <span style={{ fontSize: 13, fontWeight: 700,
+        letterSpacing: "0.04em", color: "#ffffff" }}>{text}</span>
+      {sub && (
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2 }}>
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+
+  if (done) return (
+    <div style={{
+      minHeight: "100vh", display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      padding: "40px 24px", textAlign: "center",
+      background: "radial-gradient(ellipse at top, #0d1424 0%, #020617 100%)",
+    }}>
+      <div style={{
+        width: 88, height: 88, borderRadius: "50%",
+        background: "linear-gradient(135deg,rgba(248,113,113,0.15),rgba(251,146,60,0.1))",
+        border: "2px solid rgba(248,113,113,0.3)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 42, marginBottom: 24,
+        boxShadow: "0 0 40px rgba(248,113,113,0.15)",
+        animation: "pulseFade 1.5s ease-out",
+      }}>
+        🫶
+      </div>
+
+      <div style={{ fontWeight: 900, fontSize: 24, color: "#fff",
+        letterSpacing: "-0.03em", marginBottom: 8 }}>
+        Sent.
+      </div>
+
+      <div style={{ fontSize: 14, color: "rgba(255,255,255,0.4)",
+        lineHeight: 1.8, marginBottom: 8, maxWidth: 280 }}>
+        Your review of <span style={{ color: "#fca5a5", fontWeight: 700 }}>
+          @{targetUsername}
+        </span> is saved.
+      </div>
+
+      <div style={{
+        background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)",
+        borderRadius: 16, padding: "16px 18px",
+        marginBottom: 28, maxWidth: 300, width: "100%", textAlign: "left",
+      }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em",
+          textTransform: "uppercase", color: "rgba(255,255,255,0.25)", marginBottom: 12 }}>
+          What they'll see from your review
+        </div>
+        {[
+          { icon: "⭐", text: "Your ratings averaged with others" },
+          { icon: "🎭", text: `Archetype: ${archetype || "—"}` },
+          { icon: "🐾", text: `Animal: ${animal || "—"}` },
+          { icon: greenPicks.length > 0 ? "🟢" : "🚩",
+            text: `${greenPicks.length} green · ${redPicks.length} red flags` },
+          { icon: "💬", text: `"${quoteLine.trim().slice(0, 40)}${quoteLine.trim().length > 40 ? "…" : ""}"` },
+          { icon: isAnon ? "👻" : "👤",
+            text: isAnon ? "Submitted anonymously" : `Shown as @${
+              localStorage.getItem("bond_username") ||
+              window.currentUser?.email?.split("@")[0] || "you"
+            }` },
+        ].map((r, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+            <span style={{ fontSize: 14, flexShrink: 0 }}>{r.icon}</span>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.4 }}>
+              {r.text}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <button onClick={onDone}
+        style={{
+          width: "100%", maxWidth: 300, padding: "15px", borderRadius: 16, border: "none",
+          background: "linear-gradient(135deg,#f87171,#fb923c)",
+          color: "#fff", fontWeight: 800, fontSize: 15,
+          cursor: "pointer", fontFamily: "inherit",
+          boxShadow: "0 8px 24px rgba(248,113,113,0.3)", marginBottom: 12,
+        }}>
+        ← Back to People
+      </button>
+
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.18)", lineHeight: 1.7 }}>
+        Reviews are aggregated — no single review<br />is shown raw to the person.
+      </div>
+
+      <style>{`
+        @keyframes pulseFade {
+          0%   { transform: scale(0.7); opacity: 0; }
+          60%  { transform: scale(1.08); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "16px 16px 48px" }}>
+
+      {/* ── HEADER ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 18 }}>
+        <button onClick={onBack}
+          style={{ width: 34, height: 34, borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.09)",
+            background: "rgba(255,255,255,0.04)",
+            color: "rgba(255,255,255,0.45)", fontSize: 15,
+            cursor: "pointer", display: "flex", alignItems: "center",
+            justifyContent: "center", flexShrink: 0, fontFamily: "inherit" }}>
+          ←
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: "-0.02em", color: "#fff" }}>
+            Character Check
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", marginTop: 1 }}>
+            reviewing @{targetUsername} · {isAnon ? "anonymous" : "as yourself"}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          {progressDots.map((filled, i) => (
+            <div key={i} style={{
+              width: 7, height: 7, borderRadius: "50%",
+              background: filled ? "#f87171" : "rgba(255,255,255,0.12)",
+              transition: "background 0.3s",
+            }} />
+          ))}
+        </div>
+      </div>
+
+      {/* ── SECTION 1: RATINGS ── */}
+      <div style={card}>
+        {secTitle("Ratings", "tap a number — tap again to clear")}
+        {CC_RATING_QUESTIONS.map(q => (
+          <div key={q.id} style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between",
+              alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{q.label}</div>
+              {(ratings[q.id] || 0) > 0 && (
+                <span style={{ fontSize: 11, fontWeight: 800, color: "#f87171" }}>
+                  {ratings[q.id]}/{q.max}
+                </span>
+              )}
+            </div>
+            <RatingInput
+              max={q.max}
+              value={ratings[q.id] || 0}
+              onChange={v => setRatings(p => ({ ...p, [q.id]: v }))}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* ── SECTION 2: PERSONALITY PILLS ── */}
+      <div style={card}>
+        {secTitle("Their personality", "pick one per question")}
+        {CC_PILL_QUESTIONS.map(q => (
+          <div key={q.id} style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#fff",
+              marginBottom: 9, lineHeight: 1.3 }}>
+              {q.q}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {q.options.map(opt => {
+                const active = pillAnswers[q.id] === opt;
+                return (
+                  <button key={opt}
+                    onClick={() => setPillAnswers(p => ({ ...p, [q.id]: active ? undefined : opt }))}
+                    style={{
+                      padding: "6px 12px", borderRadius: 999, fontSize: 12,
+                      fontFamily: "inherit", cursor: "pointer", transition: "all 0.14s",
+                      border: active
+                        ? "1px solid rgba(248,113,113,0.45)"
+                        : "1px solid rgba(255,255,255,0.08)",
+                      background: active ? "rgba(248,113,113,0.11)" : "rgba(255,255,255,0.025)",
+                      color: active ? "#fca5a5" : "rgba(255,255,255,0.45)",
+                      fontWeight: active ? 700 : 400,
+                    }}>
+                    {opt}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+        <div style={{ fontSize: 10, color: filledPills >= 4
+          ? "rgba(52,211,153,0.6)" : "rgba(255,255,255,0.2)",
+          marginTop: 4, transition: "color 0.3s" }}>
+          {filledPills}/7 answered {filledPills >= 4 ? "✓" : `· need ${4 - filledPills} more`}
+        </div>
+      </div>
+
+      {/* ── SECTION 3: ARCHETYPE ── */}
+      <div style={card}>
+        {secTitle("Pick their archetype", "the role they play in people's lives")}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
+          {CC_ARCHETYPES.map(a => {
+            const active = archetype === a.label;
+            return (
+              <button key={a.label}
+                onClick={() => setArchetype(active ? null : a.label)}
+                style={{
+                  padding: "11px 10px", borderRadius: 14, textAlign: "left",
+                  cursor: "pointer", transition: "all 0.14s", fontFamily: "inherit",
+                  border: active
+                    ? "1px solid rgba(248,113,113,0.4)"
+                    : "1px solid rgba(255,255,255,0.07)",
+                  background: active ? "rgba(248,113,113,0.09)" : "rgba(255,255,255,0.025)",
+                }}>
+                <div style={{ fontSize: 20, marginBottom: 4 }}>{a.emoji}</div>
+                <div style={{ fontSize: 12, lineHeight: 1.2,
+                  fontWeight: active ? 700 : 500,
+                  color: active ? "#fca5a5" : "rgba(255,255,255,0.5)" }}>
+                  {a.label}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── SECTION 4: ANIMAL ── */}
+      <div style={card}>
+        {secTitle("Pick the animal they most resemble",
+          "vibes, energy, presence — go with your gut")}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 7 }}>
+          {CC_ANIMALS.map(a => {
+            const active = animal === a.label;
+            return (
+              <button key={a.label}
+                onClick={() => setAnimal(active ? null : a.label)}
+                style={{
+                  padding: "10px 6px", borderRadius: 13, textAlign: "center",
+                  cursor: "pointer", transition: "all 0.14s", fontFamily: "inherit",
+                  border: active
+                    ? "1px solid rgba(248,113,113,0.4)"
+                    : "1px solid rgba(255,255,255,0.07)",
+                  background: active ? "rgba(248,113,113,0.09)" : "rgba(255,255,255,0.025)",
+                }}>
+                <div style={{ fontSize: 22, marginBottom: 3 }}>{a.emoji}</div>
+                <div style={{ fontSize: 10, lineHeight: 1.2,
+                  fontWeight: active ? 700 : 400,
+                  color: active ? "#fca5a5" : "rgba(255,255,255,0.35)" }}>
+                  {a.label}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {animal && (
+          <div style={{ fontSize: 11, color: "rgba(52,211,153,0.6)",
+            marginTop: 8, textAlign: "center" }}>
+            ✓ {animal} selected
+          </div>
+        )}
+      </div>
+
+      {/* ── SECTION 5: FLAGS ── */}
+      <div style={card}>
+        {secTitle("Flag board")}
+        <div style={{ fontSize: 11, fontWeight: 700,
+          color: "rgba(52,211,153,0.5)", letterSpacing: "0.08em",
+          textTransform: "uppercase", marginBottom: 8 }}>
+          Green flags · pick up to 3
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 18 }}>
+          {CC_GREEN_FLAGS.map(f => {
+            const active = greenPicks.includes(f);
+            const atMax  = greenPicks.length >= 3 && !active;
+            return (
+              <button key={f}
+                onClick={() => toggle(greenPicks, setGreenPicks, f, 3)}
+                disabled={atMax}
+                style={{
+                  padding: "6px 11px", borderRadius: 999,
+                  fontSize: 12, fontFamily: "inherit",
+                  cursor: atMax ? "default" : "pointer",
+                  transition: "all 0.14s", opacity: atMax ? 0.4 : 1,
+                  border: active
+                    ? "1px solid rgba(52,211,153,0.4)"
+                    : "1px solid rgba(255,255,255,0.07)",
+                  background: active ? "rgba(52,211,153,0.09)" : "rgba(255,255,255,0.025)",
+                  color: active ? "#6ee7b7" : "rgba(255,255,255,0.4)",
+                  fontWeight: active ? 700 : 400,
+                }}>
+                🟢 {f}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ fontSize: 11, fontWeight: 700,
+          color: "rgba(248,113,113,0.4)", letterSpacing: "0.08em",
+          textTransform: "uppercase", marginBottom: 8 }}>
+          Red flags · optional, up to 2
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {CC_RED_FLAGS.map(f => {
+            const active = redPicks.includes(f);
+            const atMax  = redPicks.length >= 2 && !active;
+            return (
+              <button key={f}
+                onClick={() => toggle(redPicks, setRedPicks, f, 2)}
+                disabled={atMax}
+                style={{
+                  padding: "6px 11px", borderRadius: 999,
+                  fontSize: 12, fontFamily: "inherit",
+                  cursor: atMax ? "default" : "pointer",
+                  transition: "all 0.14s", opacity: atMax ? 0.4 : 1,
+                  border: active
+                    ? "1px solid rgba(248,113,113,0.38)"
+                    : "1px solid rgba(255,255,255,0.07)",
+                  background: active ? "rgba(248,113,113,0.09)" : "rgba(255,255,255,0.025)",
+                  color: active ? "#fca5a5" : "rgba(255,255,255,0.4)",
+                  fontWeight: active ? 700 : 400,
+                }}>
+                🔴 {f}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── SECTION 6: TEXT QUESTIONS ── */}
+      <div style={card}>
+        {secTitle("In your words")}
+
+        <div style={{ fontSize: 13, fontWeight: 600,
+          color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
+          Describe them to a stranger in one line *
+        </div>
+        <textarea
+          rows={2} maxLength={100} value={quoteLine}
+          onChange={e => setQuoteLine(e.target.value)}
+          placeholder="e.g. the person who fixes things before you even notice…"
+          style={{ width: "100%", boxSizing: "border-box",
+            resize: "none", outline: "none", fontFamily: "inherit",
+            background: "rgba(255,255,255,0.04)",
+            border: `1px solid ${quoteLine.trim().length > 5
+              ? "rgba(52,211,153,0.3)" : "rgba(255,255,255,0.08)"}`,
+            borderRadius: 12, padding: "11px 13px",
+            color: "#fff", fontSize: 13, lineHeight: 1.5,
+            transition: "border-color 0.2s" }}
+        />
+        <div style={{ display: "flex", justifyContent: "space-between",
+          marginTop: 3, marginBottom: 18 }}>
+          <span style={{ fontSize: 10,
+            color: quoteLine.trim().length > 5
+              ? "rgba(52,211,153,0.6)" : "rgba(255,255,255,0.2)" }}>
+            {quoteLine.trim().length > 5 ? "✓ good" : `need ${6 - quoteLine.trim().length} more chars`}
+          </span>
+          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.18)" }}>
+            {quoteLine.length}/100
+          </span>
+        </div>
+
+        <div style={{ fontSize: 13, fontWeight: 600,
+          color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
+          Something only close people would know
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", marginLeft: 7 }}>
+            optional
+          </span>
+        </div>
+        <textarea
+          rows={2} maxLength={150} value={secretLine}
+          onChange={e => setSecretLine(e.target.value)}
+          placeholder="e.g. way more sensitive than they let on…"
+          style={{ width: "100%", boxSizing: "border-box",
+            resize: "none", outline: "none", fontFamily: "inherit",
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 12, padding: "11px 13px",
+            color: "#fff", fontSize: 13, lineHeight: 1.5 }}
+        />
+        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.18)",
+          textAlign: "right", marginTop: 3 }}>
+          {secretLine.length}/150
+        </div>
+      </div>
+
+      {/* ── SECTION 7: SUBMIT AS ── */}
+      <div style={card}>
+        {secTitle("Submit as")}
+        <div style={{ display: "flex", gap: 8 }}>
+          {[
+            { val: true,  icon: "👻", label: "Anonymous",
+              sub: "they'll never know it's you" },
+            { val: false, icon: "👤",
+              label: `As @${localStorage.getItem("bond_username") || window.currentUser?.email?.split("@")[0] || "you"}`,
+              sub: "shown on their profile" },
+          ].map(o => (
+            <button key={String(o.val)} onClick={() => setIsAnon(o.val)}
+              style={{
+                flex: 1, padding: "12px 10px", borderRadius: 14,
+                textAlign: "left", cursor: "pointer", fontFamily: "inherit",
+                transition: "all 0.15s",
+                border: isAnon === o.val
+                  ? "1px solid rgba(248,113,113,0.45)"
+                  : "1px solid rgba(255,255,255,0.07)",
+                background: isAnon === o.val
+                  ? "rgba(248,113,113,0.09)"
+                  : "rgba(255,255,255,0.025)",
+              }}>
+              <div style={{ fontSize: 20, marginBottom: 5 }}>{o.icon}</div>
+              <div style={{ fontSize: 12, fontWeight: 700,
+                color: isAnon === o.val ? "#fca5a5" : "rgba(255,255,255,0.55)",
+                marginBottom: 3 }}>
+                {o.label}
+              </div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>
+                {o.sub}
+              </div>
+              {isAnon === o.val && (
+                <div style={{ marginTop: 6, fontSize: 9, fontWeight: 700,
+                  letterSpacing: "0.08em", color: "rgba(248,113,113,0.6)",
+                  textTransform: "uppercase" }}>
+                  ✓ selected
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── ERROR ── */}
+      {error && (
+        <div style={{ fontSize: 12, color: "#fca5a5", textAlign: "center",
+          marginBottom: 12, padding: "10px", borderRadius: 10,
+          background: "rgba(248,113,113,0.08)",
+          border: "1px solid rgba(248,113,113,0.2)" }}>
+          {error}
+        </div>
+      )}
+
+      {/* ── SUBMIT ── */}
+      <button
+        onClick={handleSubmit}
+        disabled={!canSubmit || submitting}
+        style={{
+          width: "100%", padding: "15px", borderRadius: 16, border: "none",
+          fontWeight: 800, fontSize: 15, fontFamily: "inherit",
+          cursor: canSubmit && !submitting ? "pointer" : "default",
+          transition: "all 0.2s",
+          background: canSubmit
+            ? "linear-gradient(135deg,#f87171,#fb923c)"
+            : "rgba(255,255,255,0.06)",
+          color: canSubmit ? "#fff" : "rgba(255,255,255,0.25)",
+          boxShadow: canSubmit ? "0 8px 24px rgba(248,113,113,0.25)" : "none",
+          opacity: submitting ? 0.7 : 1,
+        }}>
+        {submitting ? "Saving…" : "Submit Character Check 🫶"}
+      </button>
+
+      {/* ── WHAT'S MISSING ── */}
+      {!canSubmit && (
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.2)",
+          textAlign: "center", marginTop: 10, lineHeight: 2 }}>
+          {[
+            filledRatings < 3 && `${3 - filledRatings} more rating${3 - filledRatings > 1 ? "s" : ""}`,
+            filledPills < 4   && `${4 - filledPills} more personality answer${4 - filledPills > 1 ? "s" : ""}`,
+            !archetype        && "pick an archetype",
+            quoteLine.trim().length < 6 && "write the one-liner (min 6 chars)",
+          ].filter(Boolean).join("  ·  ")}
+        </div>
+      )}
+
+    </div>
+  );
+}
+function ReviewerSheet({ username, onClose }) {
+  const [reviews, setReviews]       = React.useState([]);
+  const [loading, setLoading]       = React.useState(true);
+  const [openReview, setOpenReview] = React.useState(null);
+
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const { data } = await window.supabaseClient
+        .from("character_reviews")
+        .select("*")
+        .eq("target_username", username)
+        .order("created_at", { ascending: false });
+      if (mounted) { setReviews(data || []); setLoading(false); }
+    })();
+    return () => { mounted = false; };
+  }, [username]);
+
+  const getAnimalEmoji = (label) => {
+    if (!label) return null;
+    const CC_ANIMALS = [
+      { emoji:"🦁",label:"Lion"},{ emoji:"🐺",label:"Wolf"},{ emoji:"🦊",label:"Fox"},
+      { emoji:"🐻",label:"Bear"},{ emoji:"🦋",label:"Butterfly"},{ emoji:"🐬",label:"Dolphin"},
+      { emoji:"🦅",label:"Eagle"},{ emoji:"🐢",label:"Turtle"},{ emoji:"🦄",label:"Unicorn"},
+      { emoji:"🐙",label:"Octopus"},{ emoji:"🦔",label:"Hedgehog"},{ emoji:"🦚",label:"Peacock"},
+      { emoji:"🐘",label:"Elephant"},{ emoji:"🦝",label:"Raccoon"},{ emoji:"🐆",label:"Leopard"},
+    ];
+    return CC_ANIMALS.find(a => a.label.toLowerCase() === label.toLowerCase())?.emoji || "🐾";
+  };
+
+  return (
+    <div onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 1500,
+        background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)",
+        display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+
+      {/* sheet */}
+      <div onClick={e => e.stopPropagation()}
+        style={{ width: "100%", maxWidth: 480, maxHeight: "80vh",
+          background: "#0e0e12", borderRadius: "22px 22px 0 0",
+          border: "1px solid rgba(255,255,255,0.08)", borderBottom: "none",
+          display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
+        {/* handle + header */}
+        <div style={{ padding: "14px 18px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+            <div style={{ width: 36, height: 4, borderRadius: 999, background: "rgba(255,255,255,0.12)" }} />
+          </div>
+          <div style={{ fontWeight: 800, fontSize: 15, color: "#fff" }}>
+            👥 {reviews.length} review{reviews.length !== 1 ? "s" : ""} received
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 3 }}>
+            {reviews.filter(r => !r.is_anonymous).length} named ·{" "}
+            {reviews.filter(r => r.is_anonymous).length} anonymous
+          </div>
+        </div>
+
+        {/* list */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+          {loading && (
+            <div style={{ textAlign: "center", padding: "32px 0",
+              color: "rgba(255,255,255,0.2)", fontSize: 13 }}>Loading…</div>
+          )}
+          {!loading && reviews.length === 0 && (
+            <div style={{ textAlign: "center", padding: "40px 20px" }}>
+              <div style={{ fontSize: 32, marginBottom: 10 }}>🫶</div>
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.3)" }}>
+                No reviews yet
+              </div>
+            </div>
+          )}
+          {reviews.map((r, i) => {
+            const animalEmoji = getAnimalEmoji(r.animal);
+            return (
+              <button key={r.id || i}
+                onClick={() => setOpenReview(openReview === i ? null : i)}
+                style={{ width: "100%", display: "flex", alignItems: "center",
+                  gap: 12, padding: "12px 18px", background: "transparent",
+                  border: "none", borderBottom: "1px solid rgba(255,255,255,0.04)",
+                  cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+
+                {/* avatar */}
+                <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0,
+                  background: r.is_anonymous
+                    ? "rgba(255,255,255,0.07)"
+                    : "linear-gradient(135deg,#f87171,#fb923c)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: r.is_anonymous ? 16 : 14, fontWeight: 800, color: "#fff" }}>
+                  {r.is_anonymous ? "👤" : (r.reviewer_username?.[0]?.toUpperCase() || "?")}
+                </div>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700,
+                    color: r.is_anonymous ? "rgba(255,255,255,0.4)" : "#fff" }}>
+                    {r.is_anonymous ? "Anonymous" : `@${r.reviewer_username}`}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+                    {r.archetype && (
+                      <span style={{ fontSize: 10, color: "rgba(248,113,113,0.7)" }}>
+                        🎭 {r.archetype}
+                      </span>
+                    )}
+                    {animalEmoji && r.animal && (
+                      <span style={{ fontSize: 11 }}>{animalEmoji} {r.animal}</span>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.2)" }}>
+                    {new Date(r.created_at).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}
+                  </div>
+                  <div style={{ fontSize: 10, color: "rgba(248,113,113,0.5)", marginTop: 3 }}>
+                    {openReview === i ? "▲" : "▼"}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+
+          {/* expanded review */}
+          {openReview !== null && reviews[openReview] && (() => {
+            const r = reviews[openReview];
+            const CC_RATING_QUESTIONS = [
+              { id:"vibe", label:"Vibe", max:5 },
+              { id:"real", label:"Authenticity", max:5 },
+              { id:"reliable", label:"Reliability", max:7 },
+              { id:"emotional", label:"Emotional", max:5 },
+              { id:"fun", label:"Fun", max:5 },
+            ];
+            return (
+              <div style={{ margin: "8px 18px 16px",
+                background: "rgba(248,113,113,0.04)",
+                border: "1px solid rgba(248,113,113,0.12)",
+                borderRadius: 16, padding: "14px 16px" }}>
+
+                {/* quote */}
+                {r.quote_line && (
+                  <div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)",
+                    fontStyle: "italic", lineHeight: 1.6, marginBottom: 12,
+                    borderLeft: "2px solid rgba(248,113,113,0.3)", paddingLeft: 10 }}>
+                    "{r.quote_line}"
+                  </div>
+                )}
+
+                {/* ratings */}
+                {CC_RATING_QUESTIONS.some(q => (r.answers||{})[q.id] > 0) && (
+                  <div style={{ marginBottom: 12 }}>
+                    {CC_RATING_QUESTIONS.map(q => {
+                      const val = (r.answers||{})[q.id] || 0;
+                      if (!val) return null;
+                      return (
+                        <div key={q.id}
+                          style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)",
+                            width: 75, flexShrink: 0 }}>{q.label}</span>
+                          <div style={{ display: "flex", gap: 2 }}>
+                            {Array.from({length: q.max}, (_, idx) => (
+                              <div key={idx} style={{ width: 10, height: 10, borderRadius: 2,
+                                background: idx < val ? "#f87171" : "rgba(255,255,255,0.08)" }} />
+                            ))}
+                          </div>
+                          <span style={{ fontSize: 11, fontWeight: 700,
+                            color: "#f87171" }}>{val}/{q.max}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* flags */}
+                {((r.green_flags?.length > 0) || (r.red_flags?.length > 0)) && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+                    {(r.green_flags||[]).map(f => (
+                      <span key={f} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999,
+                        background: "rgba(52,211,153,0.08)", color: "rgba(52,211,153,0.8)" }}>
+                        🟢 {f}
+                      </span>
+                    ))}
+                    {(r.red_flags||[]).map(f => (
+                      <span key={f} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999,
+                        background: "rgba(248,113,113,0.08)", color: "rgba(248,113,113,0.7)" }}>
+                        🔴 {f}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {r.secret_line && (
+                  <div style={{ fontSize: 11, color: "rgba(196,181,253,0.6)",
+                    fontStyle: "italic", lineHeight: 1.5,
+                    background: "rgba(99,102,241,0.06)",
+                    borderRadius: 10, padding: "8px 10px" }}>
+                    🔮 {r.secret_line}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+
+        <button onClick={onClose}
+          style={{ margin: "0 18px 24px", padding: "12px", borderRadius: 14,
+            background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+            color: "rgba(255,255,255,0.4)", fontSize: 13, fontWeight: 600,
+            cursor: "pointer", fontFamily: "inherit" }}>
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+function CreateProfileScreen({ existingProfile, onSaved, onBack }) {
+  const isEdit = !!existingProfile;
+
+  const [displayName, setDisplayName]   = React.useState(existingProfile?.display_name || "");
+  const [bio, setBio]                   = React.useState(existingProfile?.bio || "");
+  const [college, setCollege]           = React.useState(existingProfile?.college || "");
+  const [city, setCity]                 = React.useState(existingProfile?.city || "");
+  const [oneWord, setOneWord]           = React.useState(existingProfile?.one_word || "");
+  const [selfArchetype, setSelfArchetype] = React.useState(existingProfile?.self_archetype || null);
+  const [selfAnimal, setSelfAnimal]     = React.useState(existingProfile?.self_animal || null);
+  const [selfRatings, setSelfRatings]   = React.useState(existingProfile?.self_ratings || {});
+  const [visibility, setVisibility]     = React.useState(existingProfile?.review_visibility || "everyone");
+  const [avatarUrl, setAvatarUrl]       = React.useState(existingProfile?.avatar_url || null);
+  const [avatarPreview, setAvatarPreview] = React.useState(existingProfile?.avatar_url || null);
+  const [uploading, setUploading]       = React.useState(false);
+  const [saving, setSaving]             = React.useState(false);
+  const [error, setError]               = React.useState(null);
+  const fileRef                         = React.useRef(null);
+
+  const uid = window.currentUser?.id;
+  const username = window.currentUser?.user_metadata?.username
+    || localStorage.getItem("bond_username") || "you";
+
+  const canSave = displayName.trim().length > 0;
+
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarPreview(URL.createObjectURL(file));
+    setUploading(true);
+    try {
+      let toUpload = file;
+      if (typeof compressImage === "function") {
+        try { toUpload = await compressImage(file, 400, 0.80); } catch (_) {}
+      }
+      const url = await uploadToStorage("avatars", toUpload, "people/");
+      if (url) {
+        setAvatarUrl(url);
+      } else {
+        const reader = new FileReader();
+        reader.onload = ev => setAvatarUrl(ev.target.result);
+        reader.readAsDataURL(file);
+      }
+    } catch (err) { console.warn("[CreateProfile] upload failed", err); }
+    setUploading(false);
+  };
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setSaving(true); setError(null);
+    const payload = {
+      display_name:      displayName.trim(),
+      bio:               bio.trim(),
+      college:           college.trim(),
+      city:              city.trim(),
+      one_word:          oneWord.trim(),
+      self_archetype:    selfArchetype,
+      self_animal:       selfAnimal,
+      self_ratings:      selfRatings,
+      review_visibility: visibility,
+      ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+    };
+    try {
+      if (uid) {
+        const { error: dbErr } = await window.supabaseClient
+          .from("profiles").update(payload).eq("id", uid);
+        if (dbErr) throw dbErr;
+      }
+      localStorage.setItem("bond_cc_profile", JSON.stringify({ username, ...payload }));
+      onSaved({ username, ...payload });
+    } catch (err) {
+      setError("Couldn't save — try again");
+    }
+    setSaving(false);
+  };
+
+  const card = {
+    background: "rgba(255,255,255,0.025)",
+    border: "1px solid rgba(255,255,255,0.07)",
+    borderRadius: 20, padding: "18px 16px", marginBottom: 10,
+  };
+
+const inp = {
+  width: "100%", boxSizing: "border-box",
+  background: "rgba(255,255,255,0.09)",
+  border: "1px solid rgba(255,255,255,0.16)",
+    borderRadius: 12, padding: "11px 13px",
+    color: "#fff", fontSize: 13, outline: "none",
+    fontFamily: "inherit", lineHeight: 1.4,
+  };
+
+  const secLabel = (icon, text, sub) => (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ fontSize: 13 }}>{icon}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.09em",
+          textTransform: "uppercase", color: "rgba(255,255,255,0.28)" }}>{text}</span>
+      </div>
+      {sub && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.2)",
+        paddingLeft: 19, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "16px 16px 48px" }}>
+
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 22 }}>
+        {onBack && (
+          <button onClick={onBack}
+            style={{ width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+background: "rgba(255,255,255,0.08)",
+border: "1px solid rgba(255,255,255,0.13)",
+              color: "rgba(255,255,255,0.45)", fontSize: 15,
+              cursor: "pointer", display: "flex", alignItems: "center",
+              justifyContent: "center", fontFamily: "inherit" }}>←</button>
+        )}
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: "-0.02em", color: "#fff" }}>
+            {isEdit ? "Edit Profile" : "Create Your Profile"}
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", marginTop: 2 }}>
+            {isEdit
+              ? "update how you appear to others"
+              : "people who know you will review you based on this"}
+          </div>
+        </div>
+      </div>
+
+      {/* ── SECTION 1: Photo + name ── */}
+      <div style={{ ...card, display: "flex", alignItems: "center", gap: 16 }}>
+        {/* Avatar */}
+        <div style={{ position: "relative", flexShrink: 0 }}>
+          <div onClick={() => fileRef.current?.click()}
+            style={{ width: 76, height: 76, borderRadius: "50%", cursor: "pointer",
+              background: avatarPreview
+                ? "transparent"
+                : "linear-gradient(135deg,rgba(248,113,113,0.2),rgba(251,146,60,0.1))",
+              border: avatarPreview
+                ? "2.5px solid rgba(248,113,113,0.45)"
+                : "2px dashed rgba(248,113,113,0.3)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              overflow: "hidden",
+              boxShadow: avatarPreview ? "0 4px 16px rgba(248,113,113,0.25)" : "none" }}>
+            {avatarPreview
+              ? <img src={avatarPreview} alt=""
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : <span style={{ fontSize: 24, opacity: 0.4 }}>📷</span>
+            }
+          </div>
+          {uploading && (
+            <div style={{ position: "absolute", inset: 0, borderRadius: "50%",
+              background: "rgba(0,0,0,0.65)", display: "flex",
+              alignItems: "center", justifyContent: "center" }}>
+              <div style={{ width: 18, height: 18,
+                border: "2px solid rgba(255,255,255,0.15)",
+                borderTopColor: "#f87171", borderRadius: "50%",
+                animation: "spin 0.7s linear infinite" }} />
+            </div>
+          )}
+          <div onClick={() => fileRef.current?.click()}
+            style={{ position: "absolute", bottom: 1, right: 1,
+              width: 22, height: 22, borderRadius: "50%",
+              background: "linear-gradient(135deg,#f87171,#fb923c)",
+              border: "2px solid #0d0d0f",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", fontSize: 9 }}>✏️</div>
+          <input ref={fileRef} type="file" accept="image/*"
+            onChange={handlePhotoChange}
+            style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 0, height: 0 }} />
+        </div>
+
+        {/* Name + username */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", marginBottom: 6 }}>
+            Display name *
+          </div>
+          <input value={displayName} onChange={e => setDisplayName(e.target.value)}
+            placeholder="How you want to be known" maxLength={40}
+            style={{ ...inp, padding: "9px 12px", marginBottom: 8 }} />
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.2)",
+            padding: "6px 10px", borderRadius: 8,
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.06)" }}>
+            @{username}
+          </div>
+        </div>
+      </div>
+
+      {/* ── SECTION 2: Bio + context ── */}
+      <div style={card}>
+        {secLabel("✍️", "About you")}
+
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 7 }}>
+          One-line bio
+        </div>
+        <textarea rows={2} maxLength={120} value={bio}
+          onChange={e => setBio(e.target.value)}
+          placeholder="design student, overthinker, good at playlists…"
+          style={{ ...inp, resize: "none", marginBottom: 4 }} />
+        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.18)",
+          textAlign: "right", marginBottom: 14 }}>{bio.length}/120</div>
+
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 7 }}>
+          One word that defines you
+        </div>
+        <input value={oneWord} onChange={e => setOneWord(e.target.value)}
+          placeholder="e.g. chaotic, loyal, curious…" maxLength={20}
+          style={{ ...inp, marginBottom: 14 }} />
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
+          <div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", marginBottom: 5 }}>
+              College / Company
+            </div>
+            <input value={college} onChange={e => setCollege(e.target.value)}
+              placeholder="NMIMS, Google…" maxLength={50}
+              style={{ ...inp, padding: "9px 11px", fontSize: 12 }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", marginBottom: 5 }}>
+              City
+            </div>
+            <input value={city} onChange={e => setCity(e.target.value)}
+              placeholder="Mumbai…" maxLength={30}
+              style={{ ...inp, padding: "9px 11px", fontSize: 12 }} />
+          </div>
+        </div>
+      </div>
+
+      {/* ── SECTION 3: How you see yourself ── */}
+      <div style={{ ...card, background: "rgba(99,102,241,0.04)",
+        border: "1px solid rgba(99,102,241,0.1)" }}>
+        {secLabel("🪞", "How you see yourself",
+          "reviewers will see this vs what they say about you")}
+
+        {/* Self archetype */}
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 9 }}>
+          Which archetype do you think you are?
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 16 }}>
+          {CC_ARCHETYPES.map(a => {
+            const active = selfArchetype === a.label;
+            return (
+              <button key={a.label}
+                onClick={() => setSelfArchetype(active ? null : a.label)}
+                style={{ padding: "9px 6px", borderRadius: 13, textAlign: "center",
+                  border: active ? "1px solid rgba(99,102,241,0.45)" : "1px solid rgba(255,255,255,0.07)",
+                  background: active ? "rgba(99,102,241,0.12)" : "rgba(255,255,255,0.025)",
+                  cursor: "pointer", fontFamily: "inherit", transition: "all 0.14s" }}>
+                <div style={{ fontSize: 18, marginBottom: 2 }}>{a.emoji}</div>
+                <div style={{ fontSize: 10, fontWeight: active ? 700 : 400,
+                  color: active ? "rgba(165,180,252,0.9)" : "rgba(255,255,255,0.4)",
+                  lineHeight: 1.2 }}>{a.label}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Self animal */}
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 9 }}>
+          Pick the animal that's most you
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 16 }}>
+          {CC_ANIMALS.map(a => {
+            const active = selfAnimal === a.label;
+            return (
+              <button key={a.label}
+                onClick={() => setSelfAnimal(active ? null : a.label)}
+                style={{ padding: "8px 4px", borderRadius: 11, textAlign: "center",
+                  border: active ? "1px solid rgba(99,102,241,0.4)" : "1px solid rgba(255,255,255,0.06)",
+                  background: active ? "rgba(99,102,241,0.1)" : "rgba(255,255,255,0.025)",
+                  cursor: "pointer", fontFamily: "inherit", transition: "all 0.14s" }}>
+                <div style={{ fontSize: 20, marginBottom: 2 }}>{a.emoji}</div>
+                <div style={{ fontSize: 9, fontWeight: active ? 700 : 400,
+                  color: active ? "rgba(165,180,252,0.9)" : "rgba(255,255,255,0.3)" }}>
+                  {a.label}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Self ratings */}
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 12 }}>
+          Rate yourself honestly
+        </div>
+        {CC_RATING_QUESTIONS.map(q => (
+          <div key={q.id} style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between",
+              alignItems: "center", marginBottom: 7 }}>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)",
+                display: "flex", alignItems: "center", gap: 5 }}>
+                <span>{q.emoji}</span><span>{q.label}</span>
+              </div>
+              {selfRatings[q.id] > 0 && (
+                <span style={{ fontSize: 11, fontWeight: 800,
+                  color: "rgba(165,180,252,0.8)" }}>
+                  {selfRatings[q.id]}/{q.max}
+                </span>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: q.max > 5 ? 5 : 7, flexWrap: "wrap" }}>
+              {Array.from({ length: q.max }, (_, i) => i + 1).map(n => {
+                const active = n <= (selfRatings[q.id] || 0);
+                return (
+                  <button key={n}
+                    onClick={() => setSelfRatings(p => ({
+                      ...p, [q.id]: p[q.id] === n ? 0 : n
+                    }))}
+                    style={{ width: q.max > 5 ? 28 : 32, height: q.max > 5 ? 28 : 32,
+                      borderRadius: q.max > 5 ? 8 : "50%",
+                      border: active
+                        ? "1.5px solid rgba(99,102,241,0.5)"
+                        : "1.5px solid rgba(255,255,255,0.09)",
+                      background: active
+                        ? "linear-gradient(135deg,#6366f1,#818cf8)"
+                        : "rgba(255,255,255,0.03)",
+                      color: active ? "#fff" : "rgba(255,255,255,0.3)",
+                      fontWeight: 700, fontSize: 12,
+                      cursor: "pointer", transition: "all 0.14s",
+                      fontFamily: "inherit", flexShrink: 0 }}>{n}</button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── SECTION 4: Visibility ── */}
+      <div style={card}>
+        {secLabel("🔐", "Who can review you")}
+        <div style={{ display: "flex", gap: 8 }}>
+          {[
+            { val: "everyone", icon: "🌐", label: "Everyone on BondOS", sub: "open" },
+            { val: "friends",  icon: "👥", label: "People you follow",  sub: "restricted" },
+          ].map(o => (
+            <button key={o.val} onClick={() => setVisibility(o.val)}
+              style={{ flex: 1, padding: "12px 10px", borderRadius: 14, textAlign: "left",
+                border: visibility === o.val
+                  ? "1px solid rgba(248,113,113,0.4)"
+                  : "1px solid rgba(255,255,255,0.07)",
+                background: visibility === o.val
+                  ? "rgba(248,113,113,0.08)"
+                  : "rgba(255,255,255,0.025)",
+                cursor: "pointer", fontFamily: "inherit" }}>
+              <div style={{ fontSize: 18, marginBottom: 4 }}>{o.icon}</div>
+              <div style={{ fontSize: 12, fontWeight: 700,
+                color: visibility === o.val ? "#fca5a5" : "rgba(255,255,255,0.5)" }}>
+                {o.label}
+              </div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.22)", marginTop: 2 }}>
+                {o.sub}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Info note */}
+      <div style={{ background: "rgba(255,255,255,0.02)",
+        border: "1px solid rgba(255,255,255,0.05)",
+        borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.22)", lineHeight: 1.8 }}>
+          🔒 All reviews are anonymous by default<br />
+          🌱 Profile unlocks after <strong style={{ color: "rgba(255,255,255,0.38)" }}>3 reviews</strong><br />
+          🪞 Your self-ratings will show alongside what others say
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ fontSize: 12, color: "#fca5a5",
+          textAlign: "center", marginBottom: 10 }}>{error}</div>
+      )}
+
+      <button onClick={handleSave} disabled={!canSave || saving || uploading}
+        style={{ width: "100%", padding: "15px", borderRadius: 16, border: "none",
+          background: canSave && !uploading
+            ? "linear-gradient(135deg,#f87171,#fb923c)"
+            : "rgba(255,255,255,0.06)",
+          color: canSave && !uploading ? "#fff" : "rgba(255,255,255,0.25)",
+          fontWeight: 800, fontSize: 15,
+          cursor: canSave && !uploading ? "pointer" : "default",
+          fontFamily: "inherit", transition: "all 0.2s",
+          boxShadow: canSave ? "0 8px 24px rgba(248,113,113,0.22)" : "none" }}>
+        {uploading ? "Uploading photo…"
+          : saving   ? "Saving…"
+          : isEdit   ? "Save Changes ✓"
+          : "Create Profile →"}
+      </button>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+function MyCharacterCard({ username, onOpenCreate, onOpenEdit, onViewProfile }) {
+  const [showReviewers, setShowReviewers] = React.useState(false);
+  const [profile, setProfile]         = React.useState(null);
+  const [reviewCount, setReviewCount] = React.useState(0);
+  const [avgRating, setAvgRating]     = React.useState(0);
+  const [loading, setLoading]         = React.useState(true);
+  const [activeFPCount, setActiveFPCount] = React.useState(0);
+ 
+  React.useEffect(() => {
+    if (!username) return;
+    let mounted = true;
+    (async () => {
+      const { count } = await window.supabaseClient
+        .from("fp_sessions")
+        .select("id", { count: "exact", head: true })
+        .eq("target_username", username)
+        .eq("status", "active");
+      if (mounted) setActiveFPCount(count || 0);
+    })();
+    return () => { mounted = false; };
+  }, [username]);
+ 
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const stored = localStorage.getItem("bond_cc_profile");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (mounted) setProfile(parsed);
+        }
+        const uid = window.currentUser?.id;
+        if (uid) {
+          const { data: p } = await window.supabaseClient
+            .from("profiles")
+            .select("id,username,display_name,bio,college,city,review_visibility,reviews_count,avg_rating")
+            .eq("id", uid)
+            .maybeSingle();
+          if (mounted && p?.display_name) {
+            setProfile(p);
+            setReviewCount(p.reviews_count || 0);
+            setAvgRating(p.avg_rating || 0);
+          }
+        }
+        if (username && !reviewCount) {
+          try {
+            const { count } = await window.supabaseClient
+              .from("character_reviews")
+              .select("id", { count: "exact", head: true })
+              .eq("target_username", username)
+            if (mounted) setReviewCount(count || 0);
+          } catch (_) {}
+        }
+      } catch (e) {
+        console.warn("[MyCharacterCard]", e);
+      }
+      if (mounted) setLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, [username]);
+ 
+  const handleShare = () => {
+    const url = `${window.location.origin}/people/${username}`;
+    if (navigator.share) navigator.share({ url, title: "Review me on BondOS" });
+    else if (navigator.clipboard) {
+      navigator.clipboard.writeText(url);
+      alert("Link copied! Share it to get reviews.");
+    }
+  };
+ 
+  if (loading) return (
+    <div style={{ height: 72, background: "rgba(255,255,255,0.02)",
+      border: "1px solid rgba(255,255,255,0.05)", borderRadius: 16,
+      marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ width: 16, height: 16, border: "2px solid rgba(255,255,255,0.08)",
+        borderTopColor: "#f87171", borderRadius: "50%",
+        animation: "spin 0.7s linear infinite" }} />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+ 
+  // No profile yet
+  if (!profile?.display_name) return (
+    <div style={{ background: "rgba(248,113,113,0.04)",
+      border: "1px dashed rgba(248,113,113,0.2)", borderRadius: 18,
+      padding: "18px 16px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 42, height: 42, borderRadius: "50%", flexShrink: 0,
+          background: "rgba(248,113,113,0.15)", border: "1.5px dashed rgba(248,113,113,0.3)",
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+          👤
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: "#fff", marginBottom: 3 }}>
+            You're not on the map yet
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", lineHeight: 1.5 }}>
+            Create a profile so people can review you
+          </div>
+        </div>
+        <button onClick={onOpenCreate}
+          style={{ padding: "9px 14px", borderRadius: 12, border: "none", flexShrink: 0,
+            background: "linear-gradient(135deg,#f87171,#fb923c)",
+            color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer",
+            fontFamily: "inherit", whiteSpace: "nowrap" }}>
+          Create →
+        </button>
+      </div>
+    </div>
+  );
+ 
+  const letter = (profile.display_name || "?")[0].toUpperCase();
+ 
+  return (
+    <div style={{ background: "rgba(255,255,255,0.03)",
+      border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18,
+      overflow: "hidden", marginBottom: 14 }}>
+      <div style={{ height: 2, background: "linear-gradient(90deg,#f87171,#fb923c,rgba(251,191,36,0.5))" }} />
+      <div style={{ padding: "13px 15px" }}>
+ 
+        {/* top row: avatar + name + edit */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <div style={{ width: 46, height: 46, borderRadius: "50%", flexShrink: 0,
+            background: "linear-gradient(135deg,#f87171,#fb923c)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontWeight: 800, fontSize: 17, color: "#fff" }}>
+            {letter}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#fff",
+              letterSpacing: "-0.01em", marginBottom: 3 }}>{profile.display_name}</div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.28)" }}>@{username}</span>
+              {profile.college && (
+                <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 999,
+                  background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)",
+                  color: "rgba(255,255,255,0.35)" }}>🎓 {profile.college}</span>
+              )}
+            </div>
+            {/* avg rating inline */}
+            {avgRating > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 3, marginTop: 4 }}>
+                <span style={{ fontSize: 11, color: "#fbbf24" }}>★</span>
+                <span style={{ fontSize: 12, fontWeight: 800, color: "rgba(251,191,36,0.85)" }}>
+                  {avgRating.toFixed(1)}
+                </span>
+                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)" }}>/5</span>
+              </div>
+            )}
+          </div>
+          <button onClick={onOpenEdit}
+            style={{ padding: "5px 10px", borderRadius: 9, fontSize: 11, fontWeight: 600,
+              border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
+              color: "rgba(255,255,255,0.4)", cursor: "pointer", fontFamily: "inherit" }}>Edit</button>
+        </div>
+ 
+        {profile.bio && (
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", fontStyle: "italic",
+            lineHeight: 1.5, marginBottom: 10,
+            borderLeft: "2px solid rgba(248,113,113,0.2)", paddingLeft: 8 }}>
+            {profile.bio}
+          </div>
+        )}
+ 
+        {/* bottom action row — SINGLE row, no duplicates */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setShowReviewers(true)}
+            style={{ flex: 1, padding: "8px 10px", borderRadius: 10,
+              border: "1px solid rgba(248,113,113,0.2)",
+              background: "rgba(248,113,113,0.06)",
+              color: "#fca5a5", fontWeight: 700, fontSize: 12,
+              cursor: "pointer", fontFamily: "inherit",
+              display: "flex", alignItems: "center", gap: 6 }}>
+            👥 <span style={{ fontWeight: 800 }}>{reviewCount}</span> review{reviewCount !== 1 ? "s" : ""} →
+          </button>
+          <button onClick={handleShare}
+            style={{ padding: "8px 12px", borderRadius: 10,
+              border: "1px solid rgba(99,102,241,0.3)",
+              background: "rgba(99,102,241,0.08)", color: "rgba(165,180,252,0.9)",
+              fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+            🔗
+          </button>
+        </div>
+ 
+        {/* active FP badge */}
+        {activeFPCount > 0 && (
+          <div onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent("bond_open_2fp_hub")); }}
+            style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8,
+              padding: "8px 12px", borderRadius: 12, cursor: "pointer",
+              background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)" }}>
+            <span style={{ fontSize: 14 }}>⚔️</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#fca5a5", flex: 1 }}>
+              {activeFPCount} case{activeFPCount > 1 ? "s" : ""} filed against you
+            </span>
+            <span style={{ fontSize: 11, color: "rgba(248,113,113,0.5)" }}>→</span>
+          </div>
+        )}
+      </div>
+ 
+      {/* reviewer bottom sheet */}
+      {showReviewers && (
+        <ReviewerSheet
+          username={username}
+          onClose={() => setShowReviewers(false)}
+        />
+      )}
+    </div>
+  );
+}
+// ── FPVoteBar ──
+function FPVoteBar({ sessionId, compact = false }) {
+  const [votes, setVotes] = React.useState({ challenger: 0, defender: 0 });
+  const [myVote, setMyVote] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    if (!sessionId) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid") || localStorage.getItem("bond_anon_id");
+
+        const { data: allVotes } = await window.supabaseClient
+          .from("fp_votes")
+          .select("voter_id, voted_for")
+          .eq("session_id", sessionId);
+
+        if (!mounted) return;
+
+        let c = 0, d = 0;
+        (allVotes || []).forEach(v => {
+          if (v.voted_for === "challenger") c++;
+          else if (v.voted_for === "defender") d++;
+          if (uid && v.voter_id === uid) setMyVote(v.voted_for);
+        });
+
+        setVotes({ challenger: c, defender: d });
+      } catch (e) {
+        console.warn("[FPVoteBar] load failed:", e);
+      }
+      if (mounted) setLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, [sessionId]);
+
+  const handleVote = async (side) => {
+    if (!sessionId) return;
+    if (myVote === side) return; // already voted same side
+
+const uid = window.currentUser?.id || ensureGuestUUID();
+
+    // optimistic UI
+    const prevVote = myVote;
+    setMyVote(side);
+    setVotes(prev => {
+      const next = { ...prev };
+      if (prevVote) next[prevVote] = Math.max(0, next[prevVote] - 1);
+      next[side] = (next[side] || 0) + 1;
+      return next;
+    });
+
+    try {
+      // remove old vote if switching
+      if (prevVote) {
+        await window.supabaseClient
+          .from("fp_votes")
+          .delete()
+          .eq("session_id", sessionId)
+          .eq("voter_id", uid);
+      }
+
+      await window.supabaseClient
+        .from("fp_votes")
+        .upsert({
+          session_id: sessionId,
+          voter_id: uid,
+          voted_for: side,
+        }, { onConflict: "session_id,voter_id" });
+    } catch (e) {
+      console.warn("[FPVoteBar] vote failed:", e);
+      // revert
+      setMyVote(prevVote);
+      setVotes(prev => {
+        const next = { ...prev };
+        next[side] = Math.max(0, next[side] - 1);
+        if (prevVote) next[prevVote] = (next[prevVote] || 0) + 1;
+        return next;
+      });
+    }
+  };
+
+  const total = votes.challenger + votes.defender;
+  const chalPct = total > 0 ? Math.round((votes.challenger / total) * 100) : 50;
+
+  if (loading) return (
+    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", textAlign: "center", padding: compact ? "4px 0" : "8px 0" }}>
+      Loading votes…
+    </div>
+  );
+
+  return (
+    <div>
+      {/* vote bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "rgba(255,255,255,0.3)", marginBottom: 4 }}>
+        <span>⚔️ {votes.challenger}</span>
+        <span>{total > 0 ? `${chalPct}% challenger` : "No votes yet"}</span>
+        <span>🛡️ {votes.defender}</span>
+      </div>
+      <div style={{ height: compact ? 4 : 6, borderRadius: 999, background: "rgba(255,255,255,0.07)", overflow: "hidden", marginBottom: compact ? 0 : 10 }}>
+        <div style={{
+          height: "100%", width: `${chalPct}%`,
+          background: "linear-gradient(90deg,#f87171,#818cf8)",
+          borderRadius: 999, transition: "width 0.4s ease"
+        }} />
+      </div>
+
+      {/* vote buttons (only if not compact) */}
+      {!compact && (
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button onClick={() => handleVote("challenger")}
+            style={{
+              flex: 1, padding: "9px", borderRadius: 10,
+              background: myVote === "challenger" ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.04)",
+              border: myVote === "challenger" ? "1px solid rgba(248,113,113,0.4)" : "1px solid rgba(255,255,255,0.09)",
+              color: myVote === "challenger" ? "#fca5a5" : "rgba(255,255,255,0.5)",
+              fontSize: 12, fontWeight: 700, cursor: myVote === "challenger" ? "not-allowed" : "pointer",
+              fontFamily: "inherit", opacity: myVote && myVote !== "challenger" ? 0.4 : 1,
+            }}>
+            {myVote === "challenger" ? "⚔️ Voted ✓" : "⚔️ Challenger"}
+          </button>
+          <button onClick={() => handleVote("defender")}
+            style={{
+              flex: 1, padding: "9px", borderRadius: 10,
+              background: myVote === "defender" ? "rgba(129,140,248,0.2)" : "rgba(255,255,255,0.04)",
+              border: myVote === "defender" ? "1px solid rgba(129,140,248,0.4)" : "1px solid rgba(255,255,255,0.09)",
+              color: myVote === "defender" ? "#c4b5fd" : "rgba(255,255,255,0.5)",
+              fontSize: 12, fontWeight: 700, cursor: myVote === "defender" ? "not-allowed" : "pointer",
+              fontFamily: "inherit", opacity: myVote && myVote !== "defender" ? 0.4 : 1,
+            }}>
+            {myVote === "defender" ? "🛡️ Voted ✓" : "🛡️ Defender"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+// ── FPSessionCard ──
+function FPSessionCard({ session, onOpen, onViewProfile }) {
+  const timeLeft = () => {
+    if (session.status === "closed") return "Closed";
+    const ms = new Date(session.expires_at).getTime() - Date.now();
+    if (ms <= 0) return "Expired";
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    return h > 0 ? `${h}h left` : `${m}m left`;
+  };
+
+  // strip any leading @ from stored usernames
+  const chalName = (session.challenger_username || "").replace(/^@+/, "");
+  const defName  = (session.target_username     || "").replace(/^@+/, "");
+
+  const isActive  = session.status === "active";
+  const defJoined = session.defender_joined;
+
+  return (
+    <div style={{ background: "rgba(255,255,255,0.04)",
+      border: `1px solid ${isActive ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.07)"}`,
+      borderRadius: 18, marginBottom: 10, overflow: "hidden" }}>
+      <div style={{ height: 2,
+        background: isActive
+          ? "linear-gradient(90deg,#f87171,#818cf8)"
+          : "rgba(255,255,255,0.08)" }} />
+
+      <div style={{ padding: "14px 14px 12px" }}>
+        {/* vs row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          {/* challenger */}
+          <div style={{ textAlign: "center", flex: 1 }}>
+            <div style={{ width: 38, height: 38, borderRadius: "50%",
+              background: "linear-gradient(135deg,#f87171,#fb923c)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontWeight: 800, fontSize: 15, color: "#fff", margin: "0 auto 5px" }}>
+              {chalName[0]?.toUpperCase() || "?"}
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>
+              @{chalName}
+            </div>
+            <div style={{ fontSize: 9, color: "rgba(248,113,113,0.5)", marginTop: 2 }}>
+              CHALLENGER
+            </div>
+          </div>
+
+          {/* VS badge */}
+          <div style={{ textAlign: "center", flexShrink: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: "-0.02em",
+              background: "linear-gradient(135deg,#f87171,#818cf8)",
+              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+              lineHeight: 1 }}>VS</div>
+            <div style={{ fontSize: 9, color: "rgba(255,255,255,0.2)",
+              letterSpacing: "0.1em", marginTop: 2 }}>2FP</div>
+          </div>
+
+          {/* defender */}
+          <div style={{ textAlign: "center", flex: 1 }}>
+            <div style={{ width: 38, height: 38, borderRadius: "50%",
+              background: defJoined
+                ? "linear-gradient(135deg,#818cf8,#6366f1)"
+                : "rgba(255,255,255,0.08)",
+              border: defJoined ? "none" : "2px dashed rgba(255,255,255,0.15)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontWeight: 800, fontSize: defJoined ? 15 : 16,
+              color: defJoined ? "#fff" : "rgba(255,255,255,0.25)",
+              margin: "0 auto 5px" }}>
+              {defJoined ? defName[0]?.toUpperCase() : "?"}
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700,
+              color: defJoined ? "#c4b5fd" : "rgba(255,255,255,0.35)" }}>
+              @{defName}
+            </div>
+            <div style={{ fontSize: 9, marginTop: 2,
+              color: defJoined ? "rgba(129,140,248,0.5)" : "rgba(255,255,255,0.2)" }}>
+              {defJoined ? "DEFENDING" : "NOT RESPONDING"}
+            </div>
+          </div>
+        </div>
+
+        {/* allegation */}
+        <div style={{ background: "rgba(248,113,113,0.05)",
+          border: "1px solid rgba(248,113,113,0.1)",
+          borderRadius: 10, padding: "9px 11px", marginBottom: 10,
+          fontSize: 12, color: "rgba(255,255,255,0.65)",
+          fontStyle: "italic", lineHeight: 1.5 }}>
+          "{session.allegation.length > 90
+            ? session.allegation.slice(0, 90) + "…"
+            : session.allegation}"
+        </div>
+
+        <FPVoteBar sessionId={session.id} compact={true} />
+
+        {/* bottom row */}
+        <div style={{ display: "flex", alignItems: "center",
+          justifyContent: "space-between", marginTop: 10, gap: 8 }}>
+          <span style={{ fontSize: 10,
+            color: isActive ? "rgba(52,211,153,0.6)" : "rgba(255,255,255,0.2)",
+            fontWeight: 600, flexShrink: 0 }}>
+            {isActive ? "🟢 LIVE" : "⚫ CLOSED"} · {timeLeft()}
+          </span>
+          <div style={{ display: "flex", gap: 6 }}>
+            {/* profile details button */}
+            {onViewProfile && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onViewProfile(defName); }}
+                style={{ fontSize: 11, padding: "5px 10px", borderRadius: 8,
+                  background: "rgba(129,140,248,0.1)",
+                  border: "1px solid rgba(129,140,248,0.25)",
+                  color: "#c4b5fd", fontWeight: 600, cursor: "pointer",
+                  fontFamily: "inherit" }}>
+                Profile
+              </button>
+            )}
+            <button
+              onClick={() => onOpen(session)}
+              style={{ fontSize: 11, padding: "5px 10px", borderRadius: 8,
+                background: "rgba(248,113,113,0.1)",
+                border: "1px solid rgba(248,113,113,0.25)",
+                color: "#fca5a5", fontWeight: 700, cursor: "pointer",
+                fontFamily: "inherit" }}>
+              View case →
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+function StartFPSession({ prefillTarget = "", onBack, onCreated }) {
+  const [targetUsername, setTargetUsername] = React.useState(prefillTarget);
+  const [allegation, setAllegation]         = React.useState("");
+  const [context, setContext]               = React.useState("");
+  const [saving, setSaving]                 = React.useState(false);
+  const [error, setError]                   = React.useState(null);
+  const [searchResults, setSearchResults]   = React.useState([]);
+  const [searching, setSearching]           = React.useState(false);
+
+  React.useEffect(() => {
+    if (prefillTarget || !targetUsername.trim() || targetUsername.length < 2) {
+      setSearchResults([]); return;
+    }
+    const t = setTimeout(async () => {
+      setSearching(true);
+      const { data } = await window.supabaseClient
+        .from("profiles").select("username, display_name, college")
+        .ilike("username", `%${targetUsername}%`)
+        .not("username", "is", null).limit(6);
+      setSearchResults(data || []);
+      setSearching(false);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [targetUsername, prefillTarget]);
+
+  const canSubmit = targetUsername.trim() && allegation.trim().length > 10;
+
+  const handleStart = async () => {
+    if (!canSubmit || saving) return;
+    setSaving(true); setError(null);
+    try {
+      const challengerUsername =
+        window.BOND_USERNAME || localStorage.getItem("bond_username") ||
+        window.currentUser?.email?.split("@")[0] || "anonymous";
+      const challengerId =
+        window.currentUser?.id || localStorage.getItem("bond_guest_uuid") ||
+        "guest_" + Date.now();
+
+      const { data: session, error: sErr } = await window.supabaseClient
+        .from("fp_sessions").insert({
+          allegation:          allegation.trim(),
+          context:             context.trim() || null,
+          challenger_id:       challengerId,
+          challenger_username: challengerUsername,
+          target_username:     targetUsername.trim().toLowerCase().replace(/^@+/, ""),
+          status:              "active",
+          expires_at:          new Date(Date.now() + 72 * 3600000).toISOString(),
+        }).select().single();
+      if (sErr) throw sErr;
+
+      await window.supabaseClient.from("fp_participants").insert({
+        session_id: session.id, username: challengerUsername,
+        user_id: challengerId, side: "challenger", role: "starter",
+      });
+
+      onCreated?.(session);
+    } catch (e) {
+      console.error("[2FP] start failed:", e);
+      setError("Couldn't start — try again.");
+    }
+    setSaving(false);
+  };
+
+  const inp = {
+    width: "100%", boxSizing: "border-box",
+    background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 12, padding: "11px 13px", color: "#fff", fontSize: 13,
+    outline: "none", fontFamily: "inherit", lineHeight: 1.5,
+  };
+
+  return (
+    <div style={{ padding: "16px 16px 48px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 22 }}>
+        <button onClick={onBack}
+          style={{ width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+            color: "rgba(255,255,255,0.5)", fontSize: 15, cursor: "pointer",
+            fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          ←
+        </button>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 18, color: "#fff", letterSpacing: "-0.02em" }}>
+            ⚔️ Start a 2FP
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
+            Fight for People · debate runs even if they ignore it
+          </div>
+        </div>
+      </div>
+
+      {/* target */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)",
+          textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>
+          Who are you challenging?
+        </div>
+        <div style={{ position: "relative" }}>
+          <input value={targetUsername}
+            onChange={e => { setTargetUsername(e.target.value); setSearchResults([]); }}
+            placeholder="@username" disabled={!!prefillTarget}
+            style={{ ...inp, opacity: prefillTarget ? 0.7 : 1,
+              border: "1px solid rgba(248,113,113,0.3)" }} />
+          {searching && (
+            <div style={{ position: "absolute", right: 12, top: "50%",
+              transform: "translateY(-50%)", fontSize: 11,
+              color: "rgba(255,255,255,0.3)" }}>…</div>
+          )}
+          {searchResults.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10,
+              background: "rgba(15,23,42,0.98)", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 12, marginTop: 4, overflow: "hidden" }}>
+              {searchResults.map(u => (
+                <button key={u.username}
+                  onClick={() => { setTargetUsername(u.username); setSearchResults([]); }}
+                  style={{ width: "100%", display: "flex", alignItems: "center",
+                    gap: 10, padding: "10px 14px", background: "transparent",
+                    border: "none", cursor: "pointer", fontFamily: "inherit",
+                    borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                  <div style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+                    background: "linear-gradient(135deg,#f87171,#fb923c)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 12, fontWeight: 700, color: "#fff" }}>
+                    {u.username[0].toUpperCase()}
+                  </div>
+                  <div style={{ textAlign: "left" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>@{u.username}</div>
+                    {u.college && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>{u.college}</div>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {prefillTarget && (
+          <div style={{ fontSize: 10, color: "rgba(248,113,113,0.5)", marginTop: 5, fontWeight: 600 }}>
+            ⚔️ challenging @{prefillTarget}
+          </div>
+        )}
+      </div>
+
+      {/* allegation */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)",
+          textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>
+          The allegation *
+        </div>
+        <textarea rows={3} maxLength={280} value={allegation}
+          onChange={e => setAllegation(e.target.value)}
+          placeholder="State your case clearly. This is the opening argument everyone sees…"
+          style={{ ...inp, resize: "none",
+            border: allegation.length > 10
+              ? "1px solid rgba(248,113,113,0.4)" : "1px solid rgba(255,255,255,0.12)" }} />
+        <div style={{ display: "flex", justifyContent: "space-between",
+          fontSize: 10, color: "rgba(255,255,255,0.2)", marginTop: 3 }}>
+          <span style={{ color: allegation.length > 10
+            ? "rgba(52,211,153,0.6)" : "rgba(255,255,255,0.2)" }}>
+            {allegation.length > 10 ? "✓" : `${11 - allegation.length} more chars`}
+          </span>
+          <span>{allegation.length}/280</span>
+        </div>
+      </div>
+
+      {/* context */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)",
+          textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>
+          Context / evidence
+          <span style={{ fontWeight: 400, color: "rgba(255,255,255,0.2)",
+            marginLeft: 6, textTransform: "none" }}>(optional)</span>
+        </div>
+        <textarea rows={2} maxLength={400} value={context}
+          onChange={e => setContext(e.target.value)}
+          placeholder="Screenshots, receipts, or background…"
+          style={{ ...inp, resize: "none" }} />
+      </div>
+
+      {/* rules note */}
+      <div style={{ background: "rgba(248,113,113,0.04)",
+        border: "1px solid rgba(248,113,113,0.12)",
+        borderRadius: 14, padding: "12px 14px", marginBottom: 20 }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", lineHeight: 1.9 }}>
+          ⚔️ Session opens immediately — runs for <strong style={{ color: "rgba(255,255,255,0.5)" }}>72 hours</strong><br />
+          👻 @{targetUsername || "them"} can join to defend or ignore — case continues either way<br />
+          🗳️ Spectators vote on who made the stronger case<br />
+          📣 Both sides can invite allies
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ fontSize: 12, color: "#fca5a5", textAlign: "center",
+          marginBottom: 12, padding: "10px", borderRadius: 10,
+          background: "rgba(248,113,113,0.08)" }}>
+          {error}
+        </div>
+      )}
+
+      <button onClick={handleStart} disabled={!canSubmit || saving}
+        style={{ width: "100%", padding: "15px", borderRadius: 16, border: "none",
+          background: canSubmit
+            ? "linear-gradient(135deg,#f87171,#fb923c)" : "rgba(255,255,255,0.06)",
+          color: canSubmit ? "#fff" : "rgba(255,255,255,0.25)",
+          fontWeight: 800, fontSize: 15, cursor: canSubmit ? "pointer" : "default",
+          fontFamily: "inherit", transition: "all 0.2s",
+          boxShadow: canSubmit ? "0 8px 24px rgba(248,113,113,0.3)" : "none",
+          opacity: saving ? 0.7 : 1 }}>
+        {saving ? "Opening session…" : "⚔️ File the Case"}
+      </button>
+    </div>
+  );
+}
+
+
+function CharacterProfileView({ profile, onBack, onReview }) {
+  const CC_ANIMALS = [
+    { emoji:"🦁",label:"Lion"},{ emoji:"🐺",label:"Wolf"},{ emoji:"🦊",label:"Fox"},
+    { emoji:"🐻",label:"Bear"},{ emoji:"🦋",label:"Butterfly"},{ emoji:"🐬",label:"Dolphin"},
+    { emoji:"🦅",label:"Eagle"},{ emoji:"🐢",label:"Turtle"},{ emoji:"🦄",label:"Unicorn"},
+    { emoji:"🐙",label:"Octopus"},{ emoji:"🦔",label:"Hedgehog"},{ emoji:"🦚",label:"Peacock"},
+    { emoji:"🐘",label:"Elephant"},{ emoji:"🦝",label:"Raccoon"},{ emoji:"🐆",label:"Leopard"},
+  ];
+  const CC_ARCHETYPES = [
+    { label:"The Fixer",emoji:"🔧"},{ label:"Safe House",emoji:"🏠"},
+    { label:"Chaos Agent",emoji:"🌀"},{ label:"Hype Machine",emoji:"📣"},
+    { label:"The Real One",emoji:"🪞"},{ label:"Quiet Anchor",emoji:"⚓"},
+    { label:"Wildcard",emoji:"🃏"},{ label:"Main Character",emoji:"🎬"},
+    { label:"The Therapist",emoji:"🛋️"},{ label:"Social Glue",emoji:"🫂"},
+  ];
+ 
+  const reviews = profile.reviews || [];
+  const letter = (profile.display_name || profile.username || "?")[0].toUpperCase();
+ 
+  // ── Use reviews_count from DB when reviews array hasn't loaded yet ──
+  const displayReviewCount = reviews.length > 0
+    ? reviews.length
+    : (profile.reviews_count || 0);
+ 
+  // ── Use avg_rating from DB as fallback ──
+  const dbAvgRating = profile.avg_rating || 0;
+ 
+  // ── Reviewer list state ──
+  const [showReviewers, setShowReviewers] = React.useState(false);
+  const [selectedReview, setSelectedReview] = React.useState(null);
+ 
+  // Aggregate ratings
+  const RATING_KEYS = ["vibe","real","reliable","emotional","fun"];
+  const RATING_MAX  = { vibe:5, real:5, reliable:7, emotional:5, fun:5 };
+  const RATING_LABEL = { vibe:"Overall Vibe", real:"Authenticity", reliable:"Reliability", emotional:"Emotional", fun:"Fun" };
+  const avgRatings = {};
+  RATING_KEYS.forEach(k => {
+    const vals = reviews.map(r => (r.answers||{})[k]).filter(v => v > 0);
+    avgRatings[k] = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length) : 0;
+  });
+ 
+  // Compute overall average (normalized to /5)
+  const computedAvg = (() => {
+    if (reviews.length === 0) return dbAvgRating;
+    let totalNorm = 0, samples = 0;
+    reviews.forEach(r => {
+      const ans = r.answers || {};
+      Object.entries(RATING_MAX).forEach(([k, max]) => {
+        const val = Number(ans[k] || 0);
+        if (val > 0) { totalNorm += (val / max) * 5; samples++; }
+      });
+    });
+    return samples > 0 ? parseFloat((totalNorm / samples).toFixed(2)) : dbAvgRating;
+  })();
+ 
+  // Top archetypes
+  const archetypeCounts = {};
+  reviews.forEach(r => { if (r.archetype) archetypeCounts[r.archetype] = (archetypeCounts[r.archetype]||0)+1; });
+  const topArchetypes = Object.entries(archetypeCounts).sort((a,b)=>b[1]-a[1]).slice(0,3);
+ 
+  // Top animals
+  const animalCounts = {};
+  reviews.forEach(r => { if (r.animal) animalCounts[r.animal] = (animalCounts[r.animal]||0)+1; });
+  const topAnimals = Object.entries(animalCounts).sort((a,b)=>b[1]-a[1]).slice(0,3);
+ 
+  // Green / red flags
+  const greenCount = {}, redCount = {};
+  reviews.forEach(r => {
+    (r.green_flags||[]).forEach(f => { greenCount[f] = (greenCount[f]||0)+1; });
+    (r.red_flags||[]).forEach(f => { redCount[f] = (redCount[f]||0)+1; });
+  });
+  const topGreen = Object.entries(greenCount).sort((a,b)=>b[1]-a[1]).slice(0,4);
+  const topRed   = Object.entries(redCount).sort((a,b)=>b[1]-a[1]).slice(0,3);
+ 
+  // Quotes
+  const quotes = reviews.filter(r => r.quote_line).slice(0,3);
+ 
+  const unlocked = true; // always show data if available
+ 
+  // ── Helper: get animal emoji ──
+  const getAnimalEmoji = (label) => {
+    if (!label) return "🐾";
+    return CC_ANIMALS.find(a => a.label.toLowerCase() === label.toLowerCase())?.emoji || "🐾";
+  };
+ 
+  // ── SELECTED REVIEW CARD (full screen overlay) ──
+  if (selectedReview) {
+    const r = selectedReview;
+    return (
+      <div style={{ padding: "16px 16px 48px" }}>
+        <button onClick={() => setSelectedReview(null)}
+          style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20,
+            background: "none", border: "none", color: "rgba(255,255,255,0.4)",
+            fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 0, fontWeight: 600 }}>
+          ← Back to profile
+        </button>
+ 
+        <div style={{ background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(248,113,113,0.15)", borderRadius: 20,
+          overflow: "hidden" }}>
+          <div style={{ height: 2, background: "linear-gradient(90deg,#f87171,#fb923c)" }} />
+          <div style={{ padding: "18px 16px" }}>
+ 
+            {/* reviewer header */}
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <div style={{ width: 46, height: 46, borderRadius: "50%", flexShrink: 0,
+                background: r.is_anonymous
+                  ? "rgba(255,255,255,0.08)"
+                  : "linear-gradient(135deg,#f87171,#fb923c)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: r.is_anonymous ? 18 : 17, fontWeight: 800, color: "#fff" }}>
+                {r.is_anonymous ? "👻" : (r.reviewer_username?.[0]?.toUpperCase() || "?")}
+              </div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: "#fff" }}>
+                  {r.is_anonymous ? "Anonymous reviewer" : `@${r.reviewer_username}`}
+                </div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
+                  Reviewed @{profile.username} · {new Date(r.created_at).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })}
+                </div>
+              </div>
+            </div>
+ 
+            {/* quote */}
+            {r.quote_line && (
+              <div style={{ fontSize: 14, color: "rgba(255,255,255,0.75)",
+                fontStyle: "italic", lineHeight: 1.7, marginBottom: 16,
+                borderLeft: "3px solid rgba(248,113,113,0.4)", paddingLeft: 12,
+                background: "rgba(248,113,113,0.03)", borderRadius: "0 10px 10px 0",
+                padding: "10px 14px 10px 12px" }}>
+                "{r.quote_line}"
+              </div>
+            )}
+ 
+            {/* ratings */}
+            {RATING_KEYS.some(k => (r.answers||{})[k] > 0) && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.25)",
+                  letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>
+                  Ratings given
+                </div>
+                {RATING_KEYS.map(k => {
+                  const val = (r.answers||{})[k] || 0;
+                  if (!val) return null;
+                  const pct = (val / RATING_MAX[k]) * 100;
+                  return (
+                    <div key={k} style={{ marginBottom: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between",
+                        fontSize: 11, marginBottom: 3 }}>
+                        <span style={{ color: "rgba(255,255,255,0.45)" }}>{RATING_LABEL[k]}</span>
+                        <span style={{ fontWeight: 700, color: "#f87171" }}>{val}/{RATING_MAX[k]}</span>
+                      </div>
+                      <div style={{ height: 5, borderRadius: 999,
+                        background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${pct}%`,
+                          background: "linear-gradient(90deg,#f87171,#fb923c)",
+                          borderRadius: 999 }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+ 
+            {/* archetype + animal */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              {r.archetype && (
+                <div style={{ display: "flex", alignItems: "center", gap: 5,
+                  padding: "6px 12px", borderRadius: 999,
+                  background: "rgba(248,113,113,0.08)",
+                  border: "1px solid rgba(248,113,113,0.18)" }}>
+                  <span style={{ fontSize: 14 }}>
+                    {CC_ARCHETYPES.find(a => a.label === r.archetype)?.emoji || "🎭"}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#fca5a5" }}>{r.archetype}</span>
+                </div>
+              )}
+              {r.animal && (
+                <div style={{ display: "flex", alignItems: "center", gap: 5,
+                  padding: "6px 12px", borderRadius: 999,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <span style={{ fontSize: 14 }}>{getAnimalEmoji(r.animal)}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.6)" }}>{r.animal}</span>
+                </div>
+              )}
+            </div>
+ 
+            {/* personality pill answers */}
+            {(() => {
+              const pillKeys = ["sorted","open","hype","energy","showup","conflict","memory"];
+              const pillAnswers = pillKeys.filter(k => (r.answers||{})[k]).map(k => ({
+                key: k, value: (r.answers||{})[k]
+              }));
+              if (!pillAnswers.length) return null;
+              return (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.25)",
+                    letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>
+                    Personality reads
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                    {pillAnswers.map(p => (
+                      <span key={p.key} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 999,
+                        background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+                        color: "rgba(255,255,255,0.5)" }}>
+                        {p.value}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+ 
+            {/* flags */}
+            {((r.green_flags?.length > 0) || (r.red_flags?.length > 0)) && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.25)",
+                  letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>
+                  Flags marked
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  {(r.green_flags||[]).map(f => (
+                    <span key={f} style={{ fontSize: 11, padding: "3px 9px", borderRadius: 999,
+                      background: "rgba(52,211,153,0.08)", color: "rgba(52,211,153,0.8)",
+                      border: "1px solid rgba(52,211,153,0.2)" }}>
+                      🟢 {f}
+                    </span>
+                  ))}
+                  {(r.red_flags||[]).map(f => (
+                    <span key={f} style={{ fontSize: 11, padding: "3px 9px", borderRadius: 999,
+                      background: "rgba(248,113,113,0.08)", color: "rgba(248,113,113,0.7)",
+                      border: "1px solid rgba(248,113,113,0.18)" }}>
+                      🔴 {f}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+ 
+            {/* secret line */}
+            {r.secret_line && (
+              <div style={{ fontSize: 12, color: "rgba(196,181,253,0.6)",
+                fontStyle: "italic", lineHeight: 1.5,
+                background: "rgba(99,102,241,0.06)",
+                borderRadius: 10, padding: "10px 12px" }}>
+                🔮 {r.secret_line}
+              </div>
+            )}
+          </div>
+        </div>
+ 
+        {/* close button */}
+        <button onClick={() => setSelectedReview(null)}
+          style={{ width: "100%", marginTop: 14, padding: "14px", borderRadius: 16,
+            background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
+            color: "rgba(255,255,255,0.4)", fontSize: 14, fontWeight: 600,
+            cursor: "pointer", fontFamily: "inherit" }}>
+          ← Close Review
+        </button>
+      </div>
+    );
+  }
+ 
+  // ── MAIN PROFILE VIEW ──
+  return (
+    <div style={{ padding: "16px 16px 48px" }}>
+ 
+      {/* back */}
+      <button onClick={onBack}
+        style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20,
+          background: "none", border: "none", color: "rgba(255,255,255,0.4)",
+          fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 0, fontWeight: 600 }}>
+        ← Back
+      </button>
+ 
+      {/* header card */}
+      <div style={{ background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.08)", borderRadius: 20,
+        overflow: "hidden", marginBottom: 14 }}>
+        <div style={{ height: 2, background: "linear-gradient(90deg,#f87171,#fb923c,rgba(251,191,36,0.5))" }} />
+        <div style={{ padding: "18px 16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+            <div style={{ width: 60, height: 60, borderRadius: "50%", flexShrink: 0,
+              background: "linear-gradient(135deg,#f87171,#fb923c)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontWeight: 800, fontSize: 24, color: "#fff" }}>
+              {letter}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 18, color: "#fff",
+                letterSpacing: "-0.02em", marginBottom: 4 }}>
+                {profile.display_name || profile.username}
+              </div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+                @{profile.username}
+                {profile.college ? ` · ${profile.college}` : ""}
+                {profile.city ? ` · ${profile.city}` : ""}
+              </div>
+              {profile.one_word && (
+                <span style={{ display: "inline-block", marginTop: 6, fontSize: 11,
+                  padding: "2px 10px", borderRadius: 999,
+                  background: "rgba(248,113,113,0.1)",
+                  border: "1px solid rgba(248,113,113,0.2)", color: "#fca5a5" }}>
+                  {profile.one_word}
+                </span>
+              )}
+            </div>
+ 
+            {/* RIGHT: review count + avg rating */}
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontSize: 24, fontWeight: 900, color: "#f87171" }}>
+                {displayReviewCount}
+              </div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>reviews</div>
+              {computedAvg > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 3,
+                  justifyContent: "flex-end", marginTop: 4 }}>
+                  <span style={{ fontSize: 12, color: "#fbbf24" }}>★</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "rgba(251,191,36,0.9)" }}>
+                    {computedAvg.toFixed(1)}
+                  </span>
+                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)" }}>/5</span>
+                </div>
+              )}
+            </div>
+          </div>
+ 
+          {profile.bio && (
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)",
+              fontStyle: "italic", lineHeight: 1.6, marginBottom: 14,
+              borderLeft: "2px solid rgba(248,113,113,0.25)", paddingLeft: 10 }}>
+              {profile.bio}
+            </div>
+          )}
+ 
+          {/* action buttons — share + fight only (review button is at bottom) */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => {
+              const url = `${window.location.origin}/people/${profile.username}`;
+              if (navigator.share) navigator.share({ url });
+              else if (navigator.clipboard) { navigator.clipboard.writeText(url); alert("Link copied!"); }
+            }}
+              style={{ padding: "11px 14px", borderRadius: 13,
+                border: "1px solid rgba(99,102,241,0.3)",
+                background: "rgba(99,102,241,0.08)", color: "rgba(165,180,252,0.9)",
+                fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              🔗 Share
+            </button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent("bond_start_2fp",
+              { detail: { target: profile.username } }))}
+              style={{ padding: "11px 14px", borderRadius: 13,
+                border: "1px solid rgba(248,113,113,0.2)",
+                background: "rgba(248,113,113,0.07)", color: "#fca5a5",
+                fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              ⚔️ Challenge
+            </button>
+          </div>
+        </div>
+      </div>
+ 
+      {/* ── AVERAGE RATING CARD (always visible if there's data) ── */}
+      {(computedAvg > 0 || dbAvgRating > 0) && (
+        <div style={{ background: "rgba(251,191,36,0.04)",
+          border: "1px solid rgba(251,191,36,0.15)", borderRadius: 18,
+          padding: "16px", marginBottom: 10, textAlign: "center" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(251,191,36,0.5)",
+            letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 10 }}>
+            Overall Character Rating
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 6 }}>
+            <span style={{ fontSize: 28, color: "#fbbf24" }}>★</span>
+            <span style={{ fontSize: 36, fontWeight: 900, color: "#fbbf24" }}>
+              {(computedAvg || dbAvgRating).toFixed(1)}
+            </span>
+            <span style={{ fontSize: 16, color: "rgba(255,255,255,0.25)", alignSelf: "flex-end", marginBottom: 4 }}>/5</span>
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>
+            Based on {displayReviewCount} character check{displayReviewCount !== 1 ? "s" : ""}
+          </div>
+        </div>
+      )}
+ 
+      {/* ── DETAILED RATINGS BREAKDOWN ── */}
+      {unlocked && RATING_KEYS.some(k => avgRatings[k] > 0) && (
+        <div style={{ background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.07)", borderRadius: 18,
+          padding: "16px", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)",
+            letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 14 }}>
+            ⭐ Rating breakdown (averaged)
+          </div>
+          {RATING_KEYS.map(k => {
+            const val = avgRatings[k];
+            if (!val) return null;
+            const pct = (val / RATING_MAX[k]) * 100;
+            return (
+              <div key={k} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between",
+                  fontSize: 11, marginBottom: 4 }}>
+                  <span style={{ color: "rgba(255,255,255,0.45)" }}>{RATING_LABEL[k]}</span>
+                  <span style={{ fontWeight: 700, color: "#f87171" }}>
+                    {val.toFixed(1)}/{RATING_MAX[k]}
+                  </span>
+                </div>
+                <div style={{ height: 5, borderRadius: 999,
+                  background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${pct}%`,
+                    background: "linear-gradient(90deg,#f87171,#fb923c)",
+                    borderRadius: 999, transition: "width 0.4s ease" }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+ 
+      {/* archetypes */}
+      {unlocked && topArchetypes.length > 0 && (
+        <div style={{ background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.07)", borderRadius: 18,
+          padding: "16px", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)",
+            letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
+            🎭 People see them as
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {topArchetypes.map(([label, count]) => {
+              const arch = CC_ARCHETYPES.find(a => a.label === label);
+              return (
+                <div key={label} style={{ display: "flex", alignItems: "center", gap: 6,
+                  padding: "6px 12px", borderRadius: 999,
+                  background: "rgba(248,113,113,0.08)",
+                  border: "1px solid rgba(248,113,113,0.18)" }}>
+                  <span style={{ fontSize: 14 }}>{arch?.emoji || "🎭"}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#fca5a5" }}>{label}</span>
+                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)" }}>×{count}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+ 
+      {/* animals */}
+      {unlocked && topAnimals.length > 0 && (
+        <div style={{ background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.07)", borderRadius: 18,
+          padding: "16px", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)",
+            letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
+            🐾 Their energy reminds people of
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {topAnimals.map(([label, count]) => {
+              const animal = CC_ANIMALS.find(a => a.label === label);
+              return (
+                <div key={label} style={{ display: "flex", alignItems: "center", gap: 6,
+                  padding: "6px 12px", borderRadius: 999,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <span style={{ fontSize: 16 }}>{animal?.emoji || "🐾"}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.6)" }}>{label}</span>
+                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)" }}>×{count}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+ 
+      {/* flags */}
+      {unlocked && (topGreen.length > 0 || topRed.length > 0) && (
+        <div style={{ background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.07)", borderRadius: 18,
+          padding: "16px", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)",
+            letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
+            🚩 Flag board
+          </div>
+          {topGreen.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+              {topGreen.map(([f, c]) => (
+                <span key={f} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 999,
+                  background: "rgba(52,211,153,0.08)", color: "rgba(52,211,153,0.8)",
+                  border: "1px solid rgba(52,211,153,0.2)" }}>
+                  🟢 {f} <span style={{ opacity: 0.5 }}>×{c}</span>
+                </span>
+              ))}
+            </div>
+          )}
+          {topRed.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {topRed.map(([f, c]) => (
+                <span key={f} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 999,
+                  background: "rgba(248,113,113,0.08)", color: "rgba(248,113,113,0.7)",
+                  border: "1px solid rgba(248,113,113,0.18)" }}>
+                  🔴 {f} <span style={{ opacity: 0.5 }}>×{c}</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+ 
+      {/* quotes */}
+      {unlocked && quotes.length > 0 && (
+        <div style={{ background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.07)", borderRadius: 18,
+          padding: "16px", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)",
+            letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
+            💬 What people say
+          </div>
+          {quotes.map((r, i) => (
+            <div key={i} style={{ marginBottom: i < quotes.length-1 ? 12 : 0,
+              paddingBottom: i < quotes.length-1 ? 12 : 0,
+              borderBottom: i < quotes.length-1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)",
+                fontStyle: "italic", lineHeight: 1.6, marginBottom: 4 }}>
+                "{r.quote_line}"
+              </div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>
+                {r.is_anonymous ? "👻 anonymous" : `@${r.reviewer_username || "anon"}`}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+ 
+      {/* self view */}
+      {(profile.self_archetype || profile.self_animal) && (
+        <div style={{ background: "rgba(99,102,241,0.04)",
+          border: "1px solid rgba(99,102,241,0.12)", borderRadius: 18,
+          padding: "16px", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(165,180,252,0.4)",
+            letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
+            🪞 How they see themselves
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {profile.self_archetype && (
+              <div style={{ fontSize: 12, padding: "5px 12px", borderRadius: 999,
+                background: "rgba(99,102,241,0.1)", color: "rgba(165,180,252,0.8)",
+                border: "1px solid rgba(99,102,241,0.2)", fontWeight: 600 }}>
+                🎭 {profile.self_archetype}
+              </div>
+            )}
+            {profile.self_animal && (
+              <div style={{ fontSize: 12, padding: "5px 12px", borderRadius: 999,
+                background: "rgba(99,102,241,0.1)", color: "rgba(165,180,252,0.8)",
+                border: "1px solid rgba(99,102,241,0.2)", fontWeight: 600 }}>
+                {getAnimalEmoji(profile.self_animal)} {profile.self_animal}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+ 
+      {/* ═══════════════════════════════════════════════
+          REVIEWER LIST — expandable dropdown at bottom
+         ═══════════════════════════════════════════════ */}
+      {reviews.length > 0 && (
+        <div style={{ background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.07)", borderRadius: 18,
+          overflow: "hidden", marginBottom: 14 }}>
+ 
+          {/* toggle header */}
+          <button onClick={() => setShowReviewers(v => !v)}
+            style={{ width: "100%", display: "flex", alignItems: "center",
+              justifyContent: "space-between", padding: "14px 16px",
+              background: "transparent", border: "none", cursor: "pointer",
+              fontFamily: "inherit" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 14 }}>👥</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
+                {reviews.length} reviewer{reviews.length !== 1 ? "s" : ""}
+              </span>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>
+                ({reviews.filter(r => !r.is_anonymous).length} named · {reviews.filter(r => r.is_anonymous).length} anonymous)
+              </span>
+            </div>
+            <span style={{ fontSize: 12, color: "rgba(248,113,113,0.5)",
+              transform: showReviewers ? "rotate(180deg)" : "rotate(0deg)",
+              transition: "transform 0.2s", display: "inline-block" }}>
+              ▼
+            </span>
+          </button>
+ 
+          {/* reviewer list (expanded) */}
+          {showReviewers && (
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)",
+              maxHeight: 300, overflowY: "auto" }}>
+              {reviews.map((r, i) => (
+                <button key={r.id || i}
+                  onClick={() => setSelectedReview(r)}
+                  style={{ width: "100%", display: "flex", alignItems: "center",
+                    gap: 12, padding: "11px 16px", background: "transparent",
+                    border: "none", borderBottom: "1px solid rgba(255,255,255,0.04)",
+                    cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                    transition: "background 0.15s" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(248,113,113,0.04)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+ 
+                  {/* avatar */}
+                  <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
+                    background: r.is_anonymous
+                      ? "rgba(255,255,255,0.07)"
+                      : "linear-gradient(135deg,#f87171,#fb923c)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: r.is_anonymous ? 14 : 13, fontWeight: 800, color: "#fff" }}>
+                    {r.is_anonymous ? "👻" : (r.reviewer_username?.[0]?.toUpperCase() || "?")}
+                  </div>
+ 
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700,
+                      color: r.is_anonymous ? "rgba(255,255,255,0.4)" : "#fff" }}>
+                      {r.is_anonymous ? "Anonymous" : `@${r.reviewer_username}`}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 2, flexWrap: "wrap", alignItems: "center" }}>
+                      {r.archetype && (
+                        <span style={{ fontSize: 10, color: "rgba(248,113,113,0.6)" }}>
+                          🎭 {r.archetype}
+                        </span>
+                      )}
+                      {r.animal && (
+                        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
+                          {getAnimalEmoji(r.animal)} {r.animal}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+ 
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.2)" }}>
+                      {new Date(r.created_at).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}
+                    </div>
+                    <div style={{ fontSize: 11, color: "rgba(248,113,113,0.5)", marginTop: 2 }}>
+                      View →
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+ 
+      {/* ── NO REVIEWS YET message ── */}
+      {displayReviewCount === 0 && reviews.length === 0 && (
+        <div style={{ background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.07)", borderRadius: 18,
+          padding: "28px 20px", textAlign: "center", marginBottom: 14 }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>🫶</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.45)",
+            marginBottom: 6 }}>No character checks yet</div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", lineHeight: 1.7 }}>
+            Be the first to review @{profile.username}
+          </div>
+        </div>
+      )}
+ 
+      {/* ── SINGLE review CTA at bottom ── */}
+      <button onClick={onReview}
+        style={{ width: "100%", padding: "15px", borderRadius: 16, border: "none",
+          background: "linear-gradient(135deg,#f87171,#fb923c)",
+          color: "#fff", fontWeight: 800, fontSize: 15,
+          cursor: "pointer", fontFamily: "inherit",
+          boxShadow: "0 8px 24px rgba(248,113,113,0.25)", marginTop: 6 }}>
+        ✍️ Write a Character Check
+      </button>
+    </div>
+  );
+}
+ 
+ 
+function FightForPeopleHub({ onStartNew, onBack, currentUsername }) {
+  const [sessions, setSessions]   = React.useState([]);
+  const [loading, setLoading]     = React.useState(true);
+  const [filter, setFilter]       = React.useState("all");
+  const [activeSession, setActiveSession] = React.useState(null);
+  const [refreshKey, setRefreshKey]       = React.useState(0);
+  const [viewingProfile, setViewingProfile] = React.useState(null);
+
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setLoading(true);
+      try {
+        let q = window.supabaseClient.from("fp_sessions").select("*")
+          .order("created_at", { ascending: false }).limit(40);
+        if (filter === "active")    q = q.eq("status", "active");
+        if (filter === "mine")      q = q.eq("challenger_username", currentUsername);
+        if (filter === "involving") q = q.or(
+          `challenger_username.eq.${currentUsername},target_username.eq.${currentUsername}`
+        );
+        const { data } = await q;
+        if (mounted) setSessions(data || []);
+      } catch (e) { console.warn("[2FP]", e); }
+      if (mounted) setLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, [filter, refreshKey, currentUsername]);
+
+  // Auto-expire
+  React.useEffect(() => {
+    (async () => {
+      const now = new Date().toISOString();
+      const { data: expired } = await window.supabaseClient
+        .from("fp_sessions").select("id")
+        .eq("status", "active").lt("expires_at", now);
+      if (!expired?.length) return;
+      const ids = expired.map(s => s.id);
+      await window.supabaseClient.from("fp_sessions")
+        .update({ status: "closed", winner_side: null, closed_at: now }).in("id", ids);
+      const msgs = ids.map(id => ({
+        session_id: id, sender_username: "system", sender_id: "system",
+        content: "Session expired after 72 hours — spectators decide the winner", side: "system",
+      }));
+      if (msgs.length) await window.supabaseClient.from("fp_messages").insert(msgs);
+    })();
+  }, []);
+
+  // show a profile inline via CharacterProfileView
+  if (viewingProfile) {
+    return (
+      <CharacterProfileView
+        profile={viewingProfile}
+        onBack={() => setViewingProfile(null)}
+        onReview={() => {}} // no-op from here
+      />
+    );
+  }
+
+  if (activeSession) {
+    return (
+      <FPSessionView
+        session={activeSession}
+        currentUsername={currentUsername}
+        onBack={() => { setActiveSession(null); setRefreshKey(k => k + 1); }}
+      />
+    );
+  }
+
+  const handleViewProfile = async (username) => {
+    const clean = (username || "").replace(/^@+/, "");
+    if (!clean) return;
+    const { data: profile } = await window.supabaseClient
+      .from("profiles").select("*").eq("username", clean).maybeSingle();
+    if (profile) {
+      const { data: reviews } = await window.supabaseClient
+        .from("character_reviews").select("*")
+        .eq("target_username", clean).order("created_at", { ascending: false });
+      setViewingProfile({ ...profile, reviews: reviews || [] });
+    }
+  };
+
+  const FILTERS = [
+    { id: "all",       label: "All" },
+    { id: "active",    label: "🟢 Live" },
+    { id: "mine",      label: "Mine" },
+    { id: "involving", label: "About me" },
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column",
+      height: "100vh", background: "#0a0e1a", overflow: "hidden" }}>
+
+      {/* header */}
+      <div style={{ flexShrink: 0, padding: "14px 16px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          {onBack && (
+            <button onClick={onBack}
+              style={{ width: 32, height: 32, borderRadius: 10, flexShrink: 0,
+                background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+                color: "rgba(255,255,255,0.5)", fontSize: 14, cursor: "pointer",
+                fontFamily: "inherit", display: "flex", alignItems: "center",
+                justifyContent: "center" }}>
+              ←
+            </button>
+          )}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 20,
+              letterSpacing: "-0.03em", color: "#fff" }}>
+              ⚔️ Fight for People
+            </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", marginTop: 2 }}>
+              Public cases · anyone can watch · debate runs regardless
+            </div>
+          </div>
+          <button onClick={onStartNew}
+            style={{ padding: "8px 14px", borderRadius: 12, border: "none",
+              background: "linear-gradient(135deg,#f87171,#fb923c)",
+              color: "#fff", fontWeight: 700, fontSize: 12,
+              cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+            + Start
+          </button>
+        </div>
+
+        {/* filter pills */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto" }}>
+          {FILTERS.map(f => (
+            <button key={f.id} onClick={() => setFilter(f.id)}
+              style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 999,
+                fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                background: filter === f.id ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.05)",
+                border: filter === f.id ? "1px solid rgba(248,113,113,0.4)" : "1px solid rgba(255,255,255,0.08)",
+                color: filter === f.id ? "#fca5a5" : "rgba(255,255,255,0.4)" }}>
+              {f.label}
+            </button>
+          ))}
+          <button onClick={() => setRefreshKey(k => k + 1)}
+            style={{ flexShrink: 0, padding: "5px 10px", borderRadius: 999,
+              fontSize: 11, background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              color: "rgba(255,255,255,0.3)", cursor: "pointer", fontFamily: "inherit" }}>
+            ↻
+          </button>
+        </div>
+      </div>
+
+      {/* sessions list */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 24px" }}>
+        {loading ? (
+          <div style={{ textAlign: "center", padding: "48px 0",
+            color: "rgba(248,113,113,0.4)", fontSize: 13 }}>Loading cases…</div>
+        ) : sessions.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "60px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>⚔️</div>
+            <div style={{ fontSize: 14, fontWeight: 700,
+              color: "rgba(255,255,255,0.3)", marginBottom: 6 }}>No active cases</div>
+            <button onClick={onStartNew}
+              style={{ padding: "12px 24px", borderRadius: 14, border: "none",
+                background: "linear-gradient(135deg,#f87171,#fb923c)",
+                color: "#fff", fontWeight: 700, fontSize: 14,
+                cursor: "pointer", fontFamily: "inherit" }}>
+              ⚔️ File a case
+            </button>
+          </div>
+        ) : (
+          sessions.map(s => (
+            <FPSessionCard
+              key={s.id}
+              session={s}
+              onOpen={setActiveSession}
+              onViewProfile={handleViewProfile}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+// ── FPInvitePanel ──
+function FPInvitePanel({ sessionId, side, currentUsername, onClose }) {
+  const [query, setQuery]       = React.useState("");
+  const [results, setResults]   = React.useState([]);
+  const [searching, setSearching] = React.useState(false);
+  const [invited, setInvited]   = React.useState(new Set());
+  const [participants, setParticipants] = React.useState([]);
+
+  // load existing participants
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const { data } = await window.supabaseClient
+        .from("fp_participants")
+        .select("username, side, role")
+        .eq("session_id", sessionId);
+      if (mounted) setParticipants(data || []);
+    })();
+    return () => { mounted = false; };
+  }, [sessionId]);
+
+  // search
+  React.useEffect(() => {
+    if (!query.trim() || query.length < 2) { setResults([]); return; }
+    const t = setTimeout(async () => {
+      setSearching(true);
+      const { data } = await window.supabaseClient
+        .from("profiles")
+        .select("username, display_name, college")
+        .ilike("username", `%${query}%`)
+        .not("username", "is", null)
+        .limit(8);
+      setResults(data || []);
+      setSearching(false);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const alreadyIn = (uname) =>
+    participants.some(p => p.username === uname) || invited.has(uname);
+
+  const handleInvite = async (uname) => {
+    if (alreadyIn(uname)) return;
+    setInvited(prev => new Set([...prev, uname]));
+
+    await window.supabaseClient.from("fp_participants").insert({
+      session_id: sessionId,
+      username:   uname,
+      side,
+      role:       "invited",
+    });
+
+    // also drop an invite message into the chat
+    await window.supabaseClient.from("fp_messages").insert({
+      session_id:      sessionId,
+      sender_username: "system",
+      sender_id:       "system",
+      content:         `@${currentUsername} invited @${uname} to the ${side} side`,
+      side:            "system",
+    });
+  };
+
+  const sideColor = side === "challenger"
+    ? { bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.3)", text: "#fca5a5" }
+    : { bg: "rgba(129,140,248,0.1)", border: "rgba(129,140,248,0.3)", text: "#c4b5fd" };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 2000,
+      background: "rgba(0,0,0,0.85)", backdropFilter: "blur(10px)",
+      display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ width: "100%", maxWidth: 480,
+          background: "#0e0e12", borderRadius: "20px 20px 0 0",
+          border: "1px solid rgba(255,255,255,0.08)", borderBottom: "none",
+          padding: "20px 16px 32px" }}>
+
+        {/* handle */}
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+          <div style={{ width: 36, height: 4, borderRadius: 999,
+            background: "rgba(255,255,255,0.15)" }} />
+        </div>
+
+        <div style={{ fontWeight: 800, fontSize: 15, color: "#fff",
+          marginBottom: 4 }}>
+          Invite to {side === "challenger" ? "⚔️ Challenger" : "🛡️ Defender"} side
+        </div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)",
+          marginBottom: 14 }}>
+          They can join and add their voice to your case
+        </div>
+
+        {/* current participants on this side */}
+        {participants.filter(p => p.side === side).length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+            {participants.filter(p => p.side === side).map(p => (
+              <div key={p.username}
+                style={{ fontSize: 11, padding: "3px 10px", borderRadius: 999,
+                  background: sideColor.bg, border: `1px solid ${sideColor.border}`,
+                  color: sideColor.text, fontWeight: 600 }}>
+                @{p.username}
+                {p.role === "starter" ? " 👑" : ""}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* search */}
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search username to invite…"
+          style={{ width: "100%", boxSizing: "border-box",
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 12, padding: "11px 13px",
+            color: "#fff", fontSize: 13, outline: "none",
+            fontFamily: "inherit", marginBottom: 10 }}
+        />
+
+        {/* results */}
+        <div style={{ maxHeight: 220, overflowY: "auto" }}>
+          {searching && (
+            <div style={{ textAlign: "center", padding: "12px 0",
+              fontSize: 12, color: "rgba(255,255,255,0.25)" }}>Searching…</div>
+          )}
+          {results.map(u => {
+            const already = alreadyIn(u.username);
+            const isMe    = u.username === currentUsername;
+            return (
+              <div key={u.username}
+                style={{ display: "flex", alignItems: "center",
+                  gap: 10, padding: "9px 0",
+                  borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                <div style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+                  background: "linear-gradient(135deg,#f87171,#fb923c)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontWeight: 800, fontSize: 13, color: "#fff" }}>
+                 {(u.username?.[0] || "?").toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
+                    @{u.username}
+                  </div>
+                  {u.college && (
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
+                      {u.college}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => !already && !isMe && handleInvite(u.username)}
+                  disabled={already || isMe}
+                  style={{ padding: "6px 14px", borderRadius: 10, border: "none",
+                    fontFamily: "inherit", fontSize: 11, fontWeight: 700,
+                    cursor: (already || isMe) ? "default" : "pointer",
+                    background: already
+                      ? "rgba(52,211,153,0.1)"
+                      : isMe ? "rgba(255,255,255,0.05)"
+                      : sideColor.bg,
+                    color: already
+                      ? "rgba(52,211,153,0.7)"
+                      : isMe ? "rgba(255,255,255,0.2)"
+                      : sideColor.text,
+                    border: `1px solid ${already
+                      ? "rgba(52,211,153,0.2)"
+                      : isMe ? "rgba(255,255,255,0.06)"
+                      : sideColor.border}` }}>
+                  {already ? "✓ Added" : isMe ? "You" : "Invite"}
+                </button>
+              </div>
+            );
+          })}
+          {!searching && results.length === 0 && query.length >= 2 && (
+            <div style={{ textAlign: "center", padding: "16px 0",
+              fontSize: 12, color: "rgba(255,255,255,0.2)" }}>
+              No users found
+            </div>
+          )}
+        </div>
+
+        <button onClick={onClose}
+          style={{ width: "100%", marginTop: 16, padding: "12px",
+            borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.04)",
+            color: "rgba(255,255,255,0.4)", fontSize: 13, fontWeight: 600,
+            cursor: "pointer", fontFamily: "inherit" }}>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FPSessionView({ session, currentUsername, onBack }) {
+  const [messages, setMessages]         = React.useState([]);
+  const [participants, setParticipants] = React.useState([]);
+  const [input, setInput]               = React.useState("");
+  const [sending, setSending]           = React.useState(false);
+  const [showInvite, setShowInvite]     = React.useState(null);
+  const [liveSession, setLiveSession]   = React.useState(session);
+  const [joining, setJoining]           = React.useState(false);
+  const [joiningAs, setJoiningAs]       = React.useState(null); // "challenger" | "defender"
+  const [closing, setClosing]           = React.useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = React.useState(false);
+  const [showInfo, setShowInfo]         = React.useState(false);
+  const [sideTab, setSideTab]           = React.useState("chat"); // "chat" | "sides"
+  const [lastMsgTime, setLastMsgTime]   = React.useState(null);
+  const messagesEndRef = React.useRef(null);
+  const pollRef        = React.useRef(null);
+  const inactivityRef  = React.useRef(null);
+
+  const isChallenger  = currentUsername === liveSession.challenger_username;
+  const isDefender    = currentUsername === liveSession.target_username;
+  const myParticipant = participants.find(p => p.username === currentUsername);
+  const mySide        = myParticipant?.side ||
+    (isChallenger ? "challenger" : isDefender ? "defender" : null);
+  const isParticipant = !!myParticipant;
+  const isSpectator   = !isParticipant;
+  const isClosed      = liveSession.status === "closed";
+
+  const challengers = participants.filter(p => p.side === "challenger");
+  const defenders   = participants.filter(p => p.side === "defender");
+  // strip leading @ from stored usernames (DB may store with or without)
+  const chalDisplay = (liveSession.challenger_username || "").replace(/^@+/, "");
+  const defDisplay  = (liveSession.target_username     || "").replace(/^@+/, "");
+const mountedRef = React.useRef(true);
+  const load = React.useCallback(async () => {
+    const [msgRes, parRes, sesRes] = await Promise.all([
+      window.supabaseClient.from("fp_messages").select("*")
+        .eq("session_id", session.id).order("created_at", { ascending: true }),
+      window.supabaseClient.from("fp_participants").select("*").eq("session_id", session.id),
+      window.supabaseClient.from("fp_sessions").select("*").eq("id", session.id).single(),
+    ]);
+    if (msgRes.data) {
+      setMessages(msgRes.data);
+      const realMsgs = msgRes.data.filter(m => m.side !== "system");
+      if (realMsgs.length > 0) {
+        setLastMsgTime(new Date(realMsgs[realMsgs.length - 1].created_at).getTime());
+      }
+    }
+    if (parRes.data) setParticipants(parRes.data);
+    if (sesRes.data) setLiveSession(sesRes.data);
+
+    // ── auto-expire on load ──
+    if (sesRes.data?.status === "active" && sesRes.data?.expires_at &&
+        new Date(sesRes.data.expires_at) < new Date()) {
+      await window.supabaseClient.from("fp_sessions")
+        .update({ status: "closed", winner_side: null, closed_at: new Date().toISOString() })
+        .eq("id", session.id);
+      await window.supabaseClient.from("fp_messages").insert({
+        session_id: session.id, sender_username: "system", sender_id: "system",
+        content: "Session expired after 72 hours", side: "system",
+      });
+    }
+  }, [session.id]);
+
+  // ── 5-minute inactivity auto-close ──
+  React.useEffect(() => {
+    if (isClosed) return;
+    if (inactivityRef.current) clearTimeout(inactivityRef.current);
+    inactivityRef.current = setTimeout(async () => {
+      const realMsgs = messages.filter(m => m.side !== "system");
+      if (realMsgs.length === 0) return; // no messages yet, don't close
+      const lastTime = lastMsgTime || 0;
+      const elapsed  = Date.now() - lastTime;
+      if (elapsed >= 5 * 60 * 1000) {
+        await window.supabaseClient.from("fp_sessions")
+          .update({ status: "closed", winner_side: "draw", closed_at: new Date().toISOString() })
+          .eq("id", session.id);
+        await window.supabaseClient.from("fp_messages").insert({
+          session_id: session.id, sender_username: "system", sender_id: "system",
+          content: "Session closed — no activity for 5 minutes. Declared a draw.",
+          side: "system",
+        });
+        await load();
+      }
+    }, 5 * 60 * 1000);
+    return () => clearTimeout(inactivityRef.current);
+  }, [lastMsgTime, isClosed, messages.length]);
+
+ React.useEffect(() => {
+  mountedRef.current = true;
+  load();
+  pollRef.current = setInterval(() => {
+    if (mountedRef.current) load();
+  }, 4000);
+  return () => {
+    mountedRef.current = false;
+    clearInterval(pollRef.current);
+  };
+}, [load]);
+
+  React.useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length]);
+
+  // ── join as named party (defender) ──
+  const handleJoinSide = async (side) => {
+    if (joining) return;
+    setJoining(true);
+    const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid") || "guest_" + Date.now();
+
+    // check if already a participant
+    const existing = participants.find(p => p.username === currentUsername);
+    if (existing) {
+      await window.supabaseClient.from("fp_participants")
+        .update({ role: "accepted", user_id: uid, side })
+        .eq("session_id", session.id).eq("username", currentUsername);
+    } else {
+      await window.supabaseClient.from("fp_participants").insert({
+        session_id: session.id, username: currentUsername,
+        user_id: uid, side, role: "starter",
+      });
+    }
+
+    if (side === "defender") {
+      await window.supabaseClient.from("fp_sessions")
+        .update({ defender_joined: true, defender_id: uid })
+        .eq("id", session.id);
+    }
+
+    await window.supabaseClient.from("fp_messages").insert({
+      session_id: session.id, sender_username: "system", sender_id: "system",
+      content: `@${currentUsername} joined the ${side} side`,
+      side: "system",
+    });
+
+    await load();
+    setJoiningAs(null);
+    setJoining(false);
+  };
+
+  const handleJoinAsAlly = (side) => handleJoinSide(side);
+
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || sending || isClosed || isSpectator) return;
+    if (myParticipant?.role === "invited") return;
+    setSending(true);
+    setInput("");
+    const uid = window.currentUser?.id || localStorage.getItem("bond_guest_uuid") || "anon";
+    await window.supabaseClient.from("fp_messages").insert({
+      session_id: session.id, sender_username: currentUsername,
+      sender_id: uid, content: text, side: mySide,
+    });
+    await load();
+    setSending(false);
+  };
+
+  const handleClose = async (winner) => {
+    setClosing(true);
+    await window.supabaseClient.from("fp_sessions")
+      .update({ status: "closed", winner_side: winner, closed_at: new Date().toISOString() })
+      .eq("id", session.id);
+    await window.supabaseClient.from("fp_messages").insert({
+      session_id: session.id, sender_username: "system", sender_id: "system",
+      content: winner === "draw"
+        ? "Session closed — declared a draw"
+        : `Session closed — ${winner === "challenger" ? "⚔️ Challenger" : "🛡️ Defender"} declared winner`,
+      side: "system",
+    });
+    await load();
+    setClosing(false);
+    setShowCloseConfirm(false);
+  };
+
+  const timeLeft = () => {
+    if (isClosed) return "Closed";
+    const ms = new Date(liveSession.expires_at).getTime() - Date.now();
+    if (ms <= 0) return "Expired";
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    return h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+  };
+
+  const bubbleStyle = (msg) => {
+    if (msg.side === "system") return {
+      background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.3)",
+      fontSize: 11, fontStyle: "italic", textAlign: "center",
+      padding: "5px 12px", borderRadius: 10, margin: "3px auto", maxWidth: "85%",
+    };
+    const isMe     = msg.sender_username === currentUsername;
+    const isChSide = msg.side === "challenger";
+    return {
+      background: isChSide ? "rgba(248,113,113,0.1)" : "rgba(129,140,248,0.1)",
+      border: `1px solid ${isChSide ? "rgba(248,113,113,0.18)" : "rgba(129,140,248,0.18)"}`,
+      borderRadius: isMe ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+      padding: "9px 12px", maxWidth: "78%",
+      alignSelf: isMe ? "flex-end" : "flex-start",
+    };
+  };
+
+  const invitedEntry = participants.find(p => p.username === currentUsername && p.role === "invited");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column",
+      height: "100vh", background: "#0a0e1a", overflow: "hidden" }}>
+
+      {/* ── HEADER ── */}
+      <div style={{ flexShrink: 0, background: "rgba(10,14,26,0.95)",
+        borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "10px 14px" }}>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={onBack}
+            style={{ width: 32, height: 32, borderRadius: 10, flexShrink: 0,
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+              color: "rgba(255,255,255,0.5)", fontSize: 14, cursor: "pointer",
+              fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            ←
+          </button>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#f87171",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                ⚔️ @{liveSession.challenger_username}
+                {challengers.length > 1 ? ` +${challengers.length - 1}` : ""}
+              </span>
+              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", flexShrink: 0 }}>vs</span>
+              <span style={{ fontSize: 12, fontWeight: 700,
+                color: liveSession.defender_joined ? "#c4b5fd" : "rgba(255,255,255,0.3)",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                🛡️ @{liveSession.target_username}
+                {defenders.length > 1 ? ` +${defenders.length - 1}` : ""}
+              </span>
+            </div>
+            <div style={{ fontSize: 9, fontWeight: 700,
+              color: isClosed ? "rgba(255,255,255,0.2)" : "rgba(52,211,153,0.6)",
+              marginTop: 2 }}>
+              {isClosed ? "⚫ CLOSED" : "🟢 LIVE"} · {timeLeft()}
+            </div>
+          </div>
+
+          {/* info icon */}
+          <button onClick={() => setShowInfo(v => !v)}
+            style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+              background: showInfo ? "rgba(248,113,113,0.15)" : "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              color: "rgba(255,255,255,0.4)", fontSize: 13, cursor: "pointer",
+              fontFamily: "inherit", display: "flex", alignItems: "center",
+              justifyContent: "center", fontWeight: 700 }}>
+            ℹ
+          </button>
+
+          {isChallenger && !isClosed && (
+            <button onClick={() => setShowCloseConfirm(true)}
+              style={{ padding: "5px 10px", borderRadius: 8, border: "none",
+                background: "rgba(255,255,255,0.05)",
+                color: "rgba(255,255,255,0.3)", fontSize: 10, fontWeight: 600,
+                cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+              Close
+            </button>
+          )}
+        </div>
+
+        {/* vote bar */}
+        <div style={{ marginTop: 8 }}>
+          <FPVoteBar sessionId={session.id} compact={true} />
+        </div>
+      </div>
+
+      {/* ── INFO PANEL ── */}
+      {showInfo && (
+        <div style={{ flexShrink: 0, background: "rgba(99,102,241,0.08)",
+          borderBottom: "1px solid rgba(99,102,241,0.15)", padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 1.9 }}>
+            ⚔️ <strong style={{ color: "#fca5a5" }}>Fight for People</strong> — a public debate about someone<br />
+            🟢 Session runs for <strong>72 hours</strong> regardless of whether the target responds<br />
+            👻 Target can <strong>ignore</strong> — the debate still plays out<br />
+            👥 Anyone can <strong>join a side</strong> as a participant and argue<br />
+            🗳️ Spectators vote on who made the stronger case<br />
+            ⏱️ Auto-closes after <strong>5 minutes of inactivity</strong> (declared draw)
+          </div>
+          <button onClick={() => setShowInfo(false)}
+            style={{ marginTop: 8, fontSize: 10, color: "rgba(255,255,255,0.25)",
+              background: "none", border: "none", cursor: "pointer",
+              fontFamily: "inherit", fontWeight: 600 }}>
+            Got it ✕
+          </button>
+        </div>
+      )}
+
+      {/* ── ALLEGATION ── */}
+      <div style={{ flexShrink: 0, background: "rgba(248,113,113,0.04)",
+        borderBottom: "1px solid rgba(248,113,113,0.09)", padding: "9px 14px" }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)",
+          lineHeight: 1.5, fontStyle: "italic" }}>
+          ⚔️ "{liveSession.allegation.length > 120
+            ? liveSession.allegation.slice(0, 120) + "…"
+            : liveSession.allegation}"
+        </div>
+        {liveSession.context && (
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)",
+            marginTop: 4, lineHeight: 1.5 }}>
+            Context: {liveSession.context}
+          </div>
+        )}
+      </div>
+
+      {/* ── TABS: Chat | Sides ── */}
+      <div style={{ flexShrink: 0, display: "flex", gap: 0,
+        borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+        {[
+          { id: "chat",  label: "💬 Chat" },
+          { id: "sides", label: `👥 Sides (${challengers.length + defenders.length})` },
+        ].map(t => (
+          <button key={t.id} onClick={() => setSideTab(t.id)}
+            style={{ flex: 1, padding: "9px 0", border: "none",
+              borderBottom: sideTab === t.id
+                ? "2px solid #f87171" : "2px solid transparent",
+              background: "transparent",
+              color: sideTab === t.id ? "#f87171" : "rgba(255,255,255,0.3)",
+              fontSize: 12, fontWeight: sideTab === t.id ? 700 : 500,
+              cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── SIDES TAB ── */}
+      {sideTab === "sides" && (
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
+
+          {/* spectator join options */}
+          {!isClosed && isSpectator && (
+            <div style={{ background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 14, padding: "14px", marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)",
+                marginBottom: 10 }}>
+                Join a side to participate
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => handleJoinSide("challenger")} disabled={joining}
+                  style={{ flex: 1, padding: "10px", borderRadius: 12, border: "none",
+                    background: "rgba(248,113,113,0.15)",
+                    color: "#fca5a5", fontWeight: 700, fontSize: 12,
+                    cursor: "pointer", fontFamily: "inherit", opacity: joining ? 0.6 : 1 }}>
+                  ⚔️ Join Challenger
+                </button>
+                <button onClick={() => handleJoinSide("defender")} disabled={joining}
+                  style={{ flex: 1, padding: "10px", borderRadius: 12, border: "none",
+                    background: "rgba(129,140,248,0.15)",
+                    color: "#c4b5fd", fontWeight: 700, fontSize: 12,
+                    cursor: "pointer", fontFamily: "inherit", opacity: joining ? 0.6 : 1 }}>
+                  🛡️ Join Defender
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* challenger side */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(248,113,113,0.5)",
+              textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>
+              ⚔️ Challenger side · {challengers.length}
+            </div>
+            {challengers.length === 0
+              ? <div style={{ fontSize: 12, color: "rgba(255,255,255,0.2)",
+                  fontStyle: "italic" }}>No one yet</div>
+              : challengers.map(p => (
+                <div key={p.username}
+                  style={{ display: "flex", alignItems: "center", gap: 10,
+                    padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <div style={{ width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+                    background: "linear-gradient(135deg,#f87171,#fb923c)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontWeight: 700, fontSize: 12, color: "#fff" }}>
+             {(p.username?.[0] || "?").toUpperCase()}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>
+                    @{p.username}
+                    {p.role === "starter" && (
+                      <span style={{ fontSize: 10, marginLeft: 5, color: "rgba(248,113,113,0.6)" }}>
+                        starter 👑
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+
+          {/* defender side */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(129,140,248,0.5)",
+              textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>
+              🛡️ Defender side · {defenders.length}
+            </div>
+            {defenders.length === 0
+              ? <div style={{ fontSize: 12, color: "rgba(255,255,255,0.2)",
+                  fontStyle: "italic" }}>
+                  {liveSession.defender_joined
+                    ? "Joined but no allies yet"
+                    : "Not yet responding — debate runs anyway"}
+                </div>
+              : defenders.map(p => (
+                <div key={p.username}
+                  style={{ display: "flex", alignItems: "center", gap: 10,
+                    padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <div style={{ width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+                    background: "linear-gradient(135deg,#818cf8,#6366f1)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontWeight: 700, fontSize: 12, color: "#fff" }}>
+                   {(p.username?.[0] || "?").toUpperCase()}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>
+                    @{p.username}
+                    {p.role === "starter" && (
+                      <span style={{ fontSize: 10, marginLeft: 5, color: "rgba(129,140,248,0.6)" }}>
+                        starter 👑
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      )}
+
+      {/* ── CHAT TAB ── */}
+      {sideTab === "chat" && (
+        <>
+          {/* defender join prompt */}
+          {isDefender && !myParticipant && !isClosed && (
+            <div style={{ flexShrink: 0, background: "rgba(129,140,248,0.06)",
+              borderBottom: "1px solid rgba(129,140,248,0.12)", padding: "11px 14px" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#c4b5fd", marginBottom: 4 }}>
+                🛡️ A case has been filed against you
+              </div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 9, lineHeight: 1.5 }}>
+                The debate runs regardless. Join to defend — or ignore it.
+              </div>
+              <button onClick={() => handleJoinSide("defender")} disabled={joining}
+                style={{ padding: "9px 18px", borderRadius: 10, border: "none",
+                  background: "linear-gradient(135deg,#818cf8,#6366f1)",
+                  color: "#fff", fontWeight: 700, fontSize: 12,
+                  cursor: "pointer", fontFamily: "inherit", opacity: joining ? 0.7 : 1 }}>
+                {joining ? "Joining…" : "🛡️ Defend yourself"}
+              </button>
+            </div>
+          )}
+
+          {/* invited ally prompt */}
+          {invitedEntry && !isClosed && (
+            <div style={{ flexShrink: 0, background: "rgba(251,191,36,0.05)",
+              borderBottom: "1px solid rgba(251,191,36,0.12)", padding: "11px 14px" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#fbbf24", marginBottom: 4 }}>
+                📣 You've been invited to the {invitedEntry.side} side
+              </div>
+              <button onClick={() => handleJoinAsAlly(invitedEntry.side)}
+                style={{ padding: "8px 16px", borderRadius: 10, border: "none",
+                  background: invitedEntry.side === "challenger"
+                    ? "linear-gradient(135deg,#f87171,#fb923c)"
+                    : "linear-gradient(135deg,#818cf8,#6366f1)",
+                  color: "#fff", fontWeight: 700, fontSize: 12,
+                  cursor: "pointer", fontFamily: "inherit" }}>
+                ✓ Accept & Join
+              </button>
+            </div>
+          )}
+
+          {/* spectator join nudge (in chat tab) */}
+          {isSpectator && !isClosed && (
+            <div style={{ flexShrink: 0, padding: "8px 14px",
+              borderBottom: "1px solid rgba(255,255,255,0.05)",
+              display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", flex: 1 }}>
+                👀 Watching — join a side to argue
+              </span>
+              <button onClick={() => setSideTab("sides")}
+                style={{ fontSize: 11, padding: "4px 10px", borderRadius: 8,
+                  background: "rgba(248,113,113,0.1)",
+                  border: "1px solid rgba(248,113,113,0.2)",
+                  color: "#fca5a5", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                Join →
+              </button>
+            </div>
+          )}
+
+          {/* messages */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px",
+            display: "flex", flexDirection: "column", gap: 7 }}>
+            {messages.length === 0 && (
+              <div style={{ textAlign: "center", padding: "28px 0",
+                color: "rgba(255,255,255,0.18)", fontSize: 13 }}>
+                {isClosed ? "Session closed." : "No arguments yet — make the first move."}
+              </div>
+            )}
+{messages.map((msg, i) => {
+              if (msg.side === "system") return (
+                <div key={msg.id || i} style={bubbleStyle(msg)}>{msg.content}</div>
+              );
+
+              const isMe      = msg.sender_username === currentUsername;
+              const isChSide  = msg.side === "challenger";
+              const sideColor = isChSide ? "#f87171" : "#818cf8";
+              const sideTag   = isChSide ? "C" : "D";
+              const showLabel = !i || messages[i-1]?.sender_username !== msg.sender_username
+                || messages[i-1]?.side !== msg.side;
+
+              return (
+                <div key={msg.id || i}
+                  style={{ display: "flex", flexDirection: "column",
+                    alignItems: isMe ? "flex-end" : "flex-start" }}>
+                  {showLabel && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 5,
+                      marginBottom: 2,
+                      flexDirection: isMe ? "row-reverse" : "row" }}>
+                      {/* C / D tag */}
+                      <div style={{ width: 16, height: 16, borderRadius: "50%",
+                        background: isChSide
+                          ? "rgba(248,113,113,0.2)" : "rgba(129,140,248,0.2)",
+                        border: `1px solid ${isChSide
+                          ? "rgba(248,113,113,0.4)" : "rgba(129,140,248,0.4)"}`,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 8, fontWeight: 900, color: sideColor, flexShrink: 0 }}>
+                        {sideTag}
+                      </div>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: sideColor }}>
+                        @{(msg.sender_username || "").replace(/^@+/, "")}
+                      </div>
+                    </div>
+                  )}
+                  <div style={bubbleStyle(msg)}>
+                    <div style={{ fontSize: 13, color: "#fff", lineHeight: 1.5 }}>
+                      {msg.content}
+                    </div>
+                    <div style={{ fontSize: 9, marginTop: 3, textAlign: "right",
+                      color: "rgba(255,255,255,0.18)" }}>
+                      {new Date(msg.created_at).toLocaleTimeString("en-IN",
+                        { hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            
+            
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* spectator vote */}
+          {isSpectator && !isClosed && (
+            <div style={{ flexShrink: 0, padding: "10px 14px",
+              borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.22)",
+                marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                🗳️ Your vote
+              </div>
+              <FPVoteBar sessionId={session.id} />
+            </div>
+          )}
+
+          {/* winner banner */}
+          {isClosed && (
+            <div style={{ flexShrink: 0, padding: "14px",
+              background: liveSession.winner_side === "challenger"
+                ? "rgba(248,113,113,0.08)"
+                : liveSession.winner_side === "defender"
+                ? "rgba(129,140,248,0.08)"
+                : "rgba(255,255,255,0.04)",
+              borderTop: "1px solid rgba(255,255,255,0.07)",
+              textAlign: "center" }}>
+              <div style={{ fontSize: 22, marginBottom: 4 }}>
+                {liveSession.winner_side === "challenger" ? "⚔️"
+                  : liveSession.winner_side === "defender" ? "🛡️" : "🤝"}
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 8 }}>
+                {liveSession.winner_side === "challenger" ? "Challenger won"
+                  : liveSession.winner_side === "defender" ? "Defender held their ground"
+                  : "Declared a draw"}
+              </div>
+              <FPVoteBar sessionId={session.id} />
+            </div>
+          )}
+
+          {/* input row */}
+          {!isClosed && isParticipant && myParticipant?.role !== "invited" && (
+            <div style={{ flexShrink: 0, padding: "8px 12px",
+              borderTop: "1px solid rgba(255,255,255,0.06)",
+              background: "rgba(10,14,26,0.95)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                <button onClick={() => setShowInvite(mySide)}
+                  style={{ fontSize: 10, padding: "3px 9px", borderRadius: 999,
+                    background: mySide === "challenger"
+                      ? "rgba(248,113,113,0.1)" : "rgba(129,140,248,0.1)",
+                    border: mySide === "challenger"
+                      ? "1px solid rgba(248,113,113,0.25)"
+                      : "1px solid rgba(129,140,248,0.25)",
+                    color: mySide === "challenger" ? "rgba(248,113,113,0.7)" : "rgba(129,140,248,0.7)",
+                    cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                  + Invite ally
+                </button>
+                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.18)", marginLeft: "auto" }}>
+                  {mySide === "challenger" ? "⚔️ challenger" : "🛡️ defender"}
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <textarea rows={1} value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                  placeholder="Make your argument…"
+                  style={{ flex: 1, background: "rgba(255,255,255,0.06)",
+                    border: `1px solid ${mySide === "challenger"
+                      ? "rgba(248,113,113,0.2)" : "rgba(129,140,248,0.2)"}`,
+                    borderRadius: 12, padding: "9px 12px", color: "#fff", fontSize: 13,
+                    outline: "none", fontFamily: "inherit", resize: "none", lineHeight: 1.4 }}
+                />
+                <button onClick={handleSend} disabled={!input.trim() || sending}
+                  style={{ width: 40, height: 40, borderRadius: 12, border: "none",
+                    background: input.trim()
+                      ? mySide === "challenger"
+                        ? "linear-gradient(135deg,#f87171,#fb923c)"
+                        : "linear-gradient(135deg,#818cf8,#6366f1)"
+                      : "rgba(255,255,255,0.06)",
+                    color: input.trim() ? "#fff" : "rgba(255,255,255,0.25)",
+                    fontSize: 15, cursor: input.trim() ? "pointer" : "default",
+                    flexShrink: 0, display: "flex", alignItems: "center",
+                    justifyContent: "center" }}>
+                  {sending ? "…" : "→"}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── CLOSE CONFIRM ── */}
+      {showCloseConfirm && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 3000,
+          background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)",
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ width: "100%", maxWidth: 340, background: "#0e0e12",
+            borderRadius: 20, border: "1px solid rgba(255,255,255,0.08)", padding: "22px 18px" }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#fff", marginBottom: 6 }}>
+              Close this session
+            </div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)",
+              lineHeight: 1.6, marginBottom: 18 }}>
+              Declare a winner or draw. Cannot be undone.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[
+                { winner: "challenger", label: "⚔️ Challenger wins",
+                  bg: "rgba(248,113,113,0.15)", color: "#fca5a5" },
+                { winner: "defender",   label: "🛡️ Defender wins",
+                  bg: "rgba(129,140,248,0.15)", color: "#c4b5fd" },
+                { winner: "draw",       label: "🤝 Draw",
+                  bg: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)" },
+              ].map(o => (
+                <button key={o.winner} onClick={() => handleClose(o.winner)} disabled={closing}
+                  style={{ padding: "11px", borderRadius: 12, border: "none",
+                    background: o.bg, color: o.color, fontWeight: 700, fontSize: 13,
+                    cursor: "pointer", fontFamily: "inherit" }}>
+                  {o.label}
+                </button>
+              ))}
+              <button onClick={() => setShowCloseConfirm(false)}
+                style={{ padding: "9px", borderRadius: 12, background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                  color: "rgba(255,255,255,0.3)", fontSize: 12,
+                  cursor: "pointer", fontFamily: "inherit" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── INVITE PANEL ── */}
+      {showInvite && (
+        <FPInvitePanel
+          sessionId={session.id}
+          side={showInvite}
+          currentUsername={currentUsername}
+          onClose={() => setShowInvite(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function PeopleCard({ profile, onViewProfile }) {
+  const reviewCount = profile.reviews_count || 0;
+  const avgRating = profile.avg_rating || 0;
+  const letter = (profile.display_name || profile.username || "?")[0].toUpperCase();
+ 
+  return (
+    <button
+      onClick={() => onViewProfile && onViewProfile(profile)}
+      style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 12,
+        padding: "12px 14px", background: "rgba(255,255,255,0.03)",
+        border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16,
+        marginBottom: 8, cursor: "pointer", fontFamily: "inherit",
+        textAlign: "left", transition: "border-color 0.15s",
+      }}>
+ 
+      {/* avatar */}
+      <div style={{
+        width: 42, height: 42, borderRadius: "50%", flexShrink: 0,
+        background: "linear-gradient(135deg,#f87171,#fb923c)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontWeight: 800, fontSize: 16, color: "#fff",
+      }}>
+        {letter}
+      </div>
+ 
+      {/* info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, color: "#fff",
+          marginBottom: 2, overflow: "hidden",
+          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {profile.display_name || `@${profile.username}`}
+        </div>
+ 
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          @{profile.username}
+          {profile.college ? ` · ${profile.college}` : ""}
+        </div>
+ 
+        {/* avg rating inline */}
+        {avgRating > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
+            <span style={{ fontSize: 11, color: "#fbbf24" }}>★</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(251,191,36,0.8)" }}>
+              {avgRating.toFixed(1)}
+            </span>
+            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)" }}>/5</span>
+          </div>
+        )}
+      </div>
+ 
+      {/* review count badge */}
+      <div style={{
+        flexShrink: 0, minWidth: 36, height: 36, borderRadius: 10,
+        background: reviewCount > 0 ? "rgba(248,113,113,0.1)" : "rgba(255,255,255,0.04)",
+        border: reviewCount > 0 ? "1px solid rgba(248,113,113,0.2)" : "1px solid rgba(255,255,255,0.06)",
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", padding: "0 6px",
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 800,
+          color: reviewCount > 0 ? "#fca5a5" : "rgba(255,255,255,0.2)" }}>
+          {reviewCount}
+        </span>
+        <span style={{ fontSize: 8, color: "rgba(255,255,255,0.2)",
+          letterSpacing: "0.05em", lineHeight: 1 }}>
+          checks
+        </span>
+      </div>
+    </button>
+  );
+}
+function CharacterCheckHub({ currentUser, username }) {
+  // ── ALL STATE UP TOP ──
+  const [screen, setScreen]               = React.useState("feed");
+  const [activeProfile, setActiveProfile] = React.useState(null);
+  const [search, setSearch]               = React.useState("");
+  const [searchResults, setSearchResults] = React.useState([]);
+  const [searching, setSearching]         = React.useState(false);
+  const [feedProfiles, setFeedProfiles]   = React.useState([]);
+  const [feedLoading, setFeedLoading]     = React.useState(true);
+  const [fp2PrefillTarget, setFp2PrefillTarget] = React.useState("");
+
+  // ── load profile by username helper ──
+  const loadProfileByUsername = React.useCallback(async (targetUsername) => {
+    try {
+      const { data: profile, error: pErr } = await window.supabaseClient
+        .from("profiles").select("*").eq("username", targetUsername).maybeSingle();
+      if (pErr || !profile) return null;
+      const { data: reviews } = await window.supabaseClient
+        .from("character_reviews").select("*")
+        .eq("target_username", targetUsername)
+        .order("created_at", { ascending: false });
+      return { ...profile, reviews: reviews || [] };
+    } catch (e) { return null; }
+  }, []);
+const handleViewProfile = React.useCallback(async (profile) => {
+  if (!profile?.username) return;
+
+  window.history.pushState(
+    { username: profile.username },
+    "",
+    `/people/${encodeURIComponent(profile.username)}`
+  );
+
+  // 🔥 KEY FIX:
+  // show profile instantly WITH reviews_count from feed
+  // and empty reviews array to avoid undefined errors
+  setActiveProfile({
+    ...profile,
+    reviews: []
+  });
+
+  setScreen("profile");
+
+  // fetch full data in background
+  const full = await loadProfileByUsername(profile.username);
+  if (full) setActiveProfile(full);
+
+}, [loadProfileByUsername]);
+  const handleBack = React.useCallback(() => {
+    window.history.pushState({}, "", "/");
+    setScreen("feed");
+    setActiveProfile(null);
+  }, []);
+
+  // ── 2FP event listeners ──
+  React.useEffect(() => {
+    const handle = (e) => {
+      setFp2PrefillTarget(e.detail?.target || "");
+      setScreen("2fp_start");
+    };
+    window.addEventListener("bond_start_2fp", handle);
+    return () => window.removeEventListener("bond_start_2fp", handle);
+  }, []);
+
+  React.useEffect(() => {
+    const handle = () => setScreen("2fp_hub");
+    window.addEventListener("bond_open_2fp_hub", handle);
+    return () => window.removeEventListener("bond_open_2fp_hub", handle);
+  }, []);
+
+  // ── browser back/forward ──
+  React.useEffect(() => {
+    const onPop = async () => {
+      const path  = window.location.pathname;
+      const match = path.match(/\/people\/([^/]+)/);
+      if (match) {
+        const loaded = await loadProfileByUsername(decodeURIComponent(match[1]));
+        if (loaded) { setActiveProfile(loaded); setScreen("profile"); }
+      } else {
+        setScreen("feed"); setActiveProfile(null);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [loadProfileByUsername]);
+
+  // ── on mount: deep-link check ──
+  React.useEffect(() => {
+    const match = window.location.pathname.match(/\/people\/([^/]+)/);
+    if (!match) return;
+    let mounted = true;
+    (async () => {
+      const loaded = await loadProfileByUsername(decodeURIComponent(match[1]));
+      if (!mounted) return;
+      if (loaded) { setActiveProfile(loaded); setScreen("profile"); }
+    })();
+    return () => { mounted = false; };
+  }, [loadProfileByUsername]);
+
+  // ── feed load ──
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setFeedLoading(true);
+        const { data, error } = await window.supabaseClient
+          .from("profiles")
+          .select("username,display_name,college,city,reviews_count,self_archetype,self_animal,one_word,bio,avg_rating")
+          .not("username", "is", null)
+          .not("display_name", "is", null)
+          .order("reviews_count", { ascending: false })
+          .limit(30);
+        if (error) throw error;
+        if (mounted) setFeedProfiles(data || []);
+      } catch (e) { console.warn("[People feed]", e); }
+      finally { if (mounted) setFeedLoading(false); }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  // ── search ──
+  React.useEffect(() => {
+    if (!search.trim()) { setSearchResults([]); return; }
+    const t = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const q = search.trim();
+        const { data } = await window.supabaseClient
+          .from("profiles")
+          .select("username,display_name,college,city,reviews_count,self_archetype,self_animal,one_word,bio,avg_rating")
+          .or(`username.ilike.%${q}%,display_name.ilike.%${q}%,college.ilike.%${q}%`)
+          .not("username", "is", null)
+          .limit(10);
+        setSearchResults(data || []);
+      } catch (e) {
+        const q = search.trim().toLowerCase();
+        setSearchResults(feedProfiles.filter(p =>
+          (p.username||"").toLowerCase().includes(q) ||
+          (p.display_name||"").toLowerCase().includes(q) ||
+          (p.college||"").toLowerCase().includes(q)
+        ));
+      }
+      setSearching(false);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [search, feedProfiles]);
+
+  // ── ALL SCREEN CASES (after all hooks) ──
+
+  if (screen === "2fp_start") return (
+    <StartFPSession
+      prefillTarget={fp2PrefillTarget}
+      onBack={() => setScreen("feed")}
+      onCreated={() => setScreen("2fp_hub")}
+    />
+  );
+
+  if (screen === "2fp_hub") return (
+    <FightForPeopleHub
+      currentUsername={username}
+      onStartNew={() => setScreen("2fp_start")}
+      onBack={() => setScreen("feed")}
+    />
+  );
+if (screen === "create") return (
+  <CreateProfileScreen
+    existingProfile={null}
+    onBack={() => setScreen("feed")}
+    onSaved={async (p) => {
+      await saveProfileToDB(p);
+      setActiveProfile(p);
+      setScreen("profile");
+    }}
+  />
+);
+
+if (screen === "edit") return (
+  <CreateProfileScreen
+    existingProfile={activeProfile}
+    onBack={() => setScreen("feed")}
+    onSaved={async (p) => {
+      await saveProfileToDB(p);
+      setActiveProfile(p);
+      setScreen("profile");
+    }}
+  />
+);
+  if (screen === "review" && activeProfile) return (
+    <CharacterReviewForm
+      targetUsername={activeProfile.username}
+      onBack={() => setScreen("profile")}
+      onDone={async () => {
+        const refreshed = await loadProfileByUsername(activeProfile.username);
+        if (refreshed) setActiveProfile(refreshed);
+        setScreen("profile");
+      }}
+    />
+  );
+
+  if (screen === "profile" && activeProfile) return (
+    <CharacterProfileView
+      profile={activeProfile}
+      onBack={handleBack}
+      onReview={() => setScreen("review")}
+    />
+  );
+
+  // ── FEED (default) ──
+  const list = search.trim() ? searchResults : feedProfiles;
+
+  return (
+    <div style={{ padding: "16px 16px 0" }}>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.16em",
+          color: "rgba(248,113,113,0.5)", textTransform: "uppercase", marginBottom: 3 }}>
+          BondOS
+        </div>
+        <div style={{ fontWeight: 800, fontSize: 22, letterSpacing: "-0.03em", color: "#fff" }}>
+          People
+        </div>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", marginTop: 3, lineHeight: 1.5 }}>
+          how people really are, built by the people who know them
+        </div>
+      </div>
+
+      <MyCharacterCard
+        username={username || currentUser?.email?.split("@")[0] || localStorage.getItem("bond_username") || "you"}
+        onOpenCreate={() => setScreen("create")}
+        onOpenEdit={() => setScreen("edit")}
+        onViewProfile={handleViewProfile}
+      />
+
+
+      {/* ⚔️ 2FP entry point */}
+      <button
+        onClick={() => setScreen("2fp_hub")}
+        style={{ width: "100%", marginBottom: 14, padding: "11px", borderRadius: 12,
+          cursor: "pointer", fontFamily: "inherit",
+          background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.2)",
+          color: "#fca5a5", fontSize: 13, fontWeight: 700,
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        ⚔️ Fight for People · view all cases
+      </button>
+
+      <div style={{ position: "relative", marginBottom: 12 }}>
+        <span style={{ position: "absolute", left: 12, top: "50%",
+          transform: "translateY(-50%)", fontSize: 13, opacity: 0.28, pointerEvents: "none" }}>🔍</span>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search someone to review…"
+          style={{ width: "100%", boxSizing: "border-box",
+            background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 13, padding: "11px 13px 11px 36px",
+            color: "#fff", fontSize: 13, outline: "none", fontFamily: "inherit" }} />
+        {searching && (
+          <span style={{ position: "absolute", right: 12, top: "50%",
+            transform: "translateY(-50%)", fontSize: 11, color: "rgba(255,255,255,0.22)" }}>…</span>
+        )}
+      </div>
+
+      {!search && (
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
+          textTransform: "uppercase", color: "rgba(255,255,255,0.25)", marginBottom: 10 }}>
+          People on BondOS
+        </div>
+      )}
+
+      {feedLoading && !search && (
+        <div style={{ textAlign: "center", padding: "32px 0",
+          color: "rgba(255,255,255,0.2)", fontSize: 13 }}>Loading people…</div>
+      )}
+
+      {list.map(p => (
+        <PeopleCard key={p.username} profile={p} onViewProfile={handleViewProfile} />
+      ))}
+
+      {search && list.length === 0 && !searching && (
+        <div style={{ textAlign: "center", padding: "32px 0",
+          fontSize: 13, color: "rgba(255,255,255,0.2)" }}>
+          No one found for "{search}"
+        </div>
+      )}
+
+      {!search && !feedLoading && list.length === 0 && (
+        <div style={{ textAlign: "center", padding: "40px 0" }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>👥</div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.25)" }}>
+            No profiles yet — create yours above
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 /* ---------- Expose / Usage: Wrap your app root with SocialProvider ---------- */
 // Example:
 
@@ -10535,13 +15583,14 @@ const App = () => {
 const { user, loading: authLoading } = useSocial();
 
 /* ---------------- VIEW ---------------- */
-const [view, setView] = useState("test");
+const [view, setView] = useState("social"); 
 
 /* ---------------- LOCAL USER MODE ---------------- */
-const [isGuest, setIsGuest] = useState(
-() => localStorage.getItem("bond_guest") === "true"
-);
-
+const [isGuest, setIsGuest] = useState(() => {
+  const hasUsername = !!localStorage.getItem("bond_username");
+  if (!hasUsername) localStorage.setItem("bond_guest", "true");
+  return true; // everyone is guest by default until they log in
+});
 const [username, setUsername] = useState(
 () => localStorage.getItem("bond_username") || ""
 );
@@ -10562,14 +15611,12 @@ useEffect(() => {
 if (!window.BondTrace) return;
 
 const map = {
-test: "test_home",
-play: "play_home",
-plan: "plan_home",
-verse: "verse_home",
-ideal: "ideal_home",
-social: "social_home"
+  people: "people_home",
+  play: "play_home",
+ // verse:  "verse_home",
+  ideal: "ideal_home",
+  social: "social_home"
 };
-
 BondTrace.screen(map[view] || "home");
 }, [view]);
 
@@ -10596,50 +15643,34 @@ localStorage.removeItem("bond_username");
 localStorage.removeItem("bond_guest");
 window.location.reload();
 };
-
 const NavBtn = ({ v, icon, label }) => {
-const active = view === v;
-const isSocial = v === "social";
-if (isSocial) {
-return (
-  <button
-   onClick={() => setView(v)}
-   style={{
-     display:"flex", alignItems:"center", gap:7,
-     padding:"10px 20px", borderRadius:999,
-     background: active ? "linear-gradient(135deg,#f87171,#fb923c)" : "rgba(248,113,113,0.1)",
-     border: active ? "1px solid rgba(248,113,113,0.55)" : "1px solid rgba(248,113,113,0.22)",
-     color: active ? "#fff" : "rgba(248,113,113,0.75)",
-     fontWeight:700, fontSize:13, letterSpacing:"-0.01em",
-     cursor:"pointer",
-     boxShadow: active ? "0 6px 22px rgba(248,113,113,0.32),0 2px 8px rgba(0,0,0,0.25)" : "0 2px 10px rgba(248,113,113,0.1)",
-     transform:"translateY(-7px)",
-     transition:"all 0.2s ease",
-     flexShrink:0,
-   }}
-  >
-   <Icon name={icon} style={{ width:15, height:15 }} />
-   <span>Social</span>
-  </button>
-);
-}
-return (
-<button
- onClick={() => setView(v)}
- style={{
-   display:"flex", flexDirection:"column", alignItems:"center",
-   padding:"6px 8px", borderRadius:12, border:"none", cursor:"pointer",
-   background:"transparent",
-   color: active ? "#f87171" : "rgba(255,255,255,0.38)",
-   transition:"all 0.18s ease",
- }}
->
- <Icon name={icon} className="w-5 h-5" style={{ marginBottom:2 }} />
- <span style={{ fontSize:10, fontWeight: active ? 700 : 500 }}>{label}</span>
-</button>
-);
+  const active = view === v;
+  return (
+    <button
+      onClick={() => setView(v)}
+      style={{
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        flex: 1, padding: "7px 4px", borderRadius: 12,
+        border: active
+          ? "1px solid rgba(248,113,113,0.4)"
+          : "1px solid rgba(255,255,255,0.08)",
+        background: active ? "rgba(248,113,113,0.08)" : "transparent",
+        color: active ? "#f87171" : "rgba(255,255,255,0.32)",
+        cursor: "pointer", transition: "all 0.18s ease",
+        minWidth: 0, gap: 4, fontFamily: "inherit",
+      }}
+    >
+      <div style={{ width: 20, height: 20, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Icon name={icon} className="w-full h-full" />
+      </div>
+      <span style={{ fontSize: 9, fontWeight: active ? 700 : 500,
+        letterSpacing: "0.01em", whiteSpace: "nowrap" }}>
+        {label}
+      </span>
+    </button>
+  );
 };
-
 /* ---------------- 🔥 AUTH LOADING BLOCK ---------------- */
 
 
@@ -10652,7 +15683,10 @@ items-center justify-center">
  );
 }
 /* ---------------- PRE-DASHBOARD FLOW ---------------- */
-
+// ✅ ADD THIS ↓
+if (window.location.pathname === "/insta-login") {
+  return <InstaLoginPage />;
+}
 if (!user && !userKey) {
 return (
 <div className="bond-app-shell bg-bondBg max-w-md mx-auto">
@@ -10686,55 +15720,50 @@ return (
 
 /* ---------------- VIEW SWITCHER ---------------- */
 const renderView = () => {
-switch (view) {
-case "ideal":
-  return <IdealMatchHub data={data} save={save} />;
-
-case "social":
-  return <SocialHub />;
-
-default:
-  return (
-    <Dashboard
-      data={data}
-      save={save}
-      view={view}
-      setView={setView}
-      onReset={handleReset}
-    />
-  );
-}
+  switch (view) {
+    case "ideal":
+      return <IdealMatchHub data={data} save={save} />;
+    case "social":
+      return <SocialHub />;
+    case "people":
+      return <CharacterCheckHub currentUser={user} username={username} />;
+    default:
+      return <Dashboard data={data} save={save} view={view} setView={setView} onReset={handleReset} />;
+  }
 };
 /* ---------------- MAIN APP ---------------- */
 
 return (
-<div className="bond-app-shell bg-bondBg max-w-md mx-auto">
-<div className="bond-main">
-  {renderView()}
-</div>
-<div className="bond-bottom-shell">
-<div
-style={{
-background: "rgba(10,14,26,0.88)",
-backdropFilter: "blur(18px)",
-borderTop: "1px solid rgba(255,255,255,0.07)",
-padding: "8px 12px 16px",
-display: "flex",
-alignItems: "flex-end",
-justifyContent: "space-around",
-}}
->
-<NavBtn v="test" icon="heart" label="Test" />
-<NavBtn v="verse" icon="atom" label="Verse" />
-<NavBtn v="social" icon="users" label="Social" />
-<NavBtn v="moods" icon="pulse" label="Moods" />
-<NavBtn v="play" icon="puzzle" label="Play" />
-</div>
-</div>
-</div>
+  <div className="bond-app-shell bg-bondBg max-w-md mx-auto">
+    <div className="bond-main">
+      {renderView()}
+    </div>
+
+    <div className="bond-bottom-shell">
+      <div
+        style={{
+          background: "rgba(10,14,26,0.94)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+          padding: "6px 10px",
+          paddingBottom: "calc(6px + env(safe-area-inset-bottom, 0px))",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-around",
+          gap: 5,
+        }}
+      >
+        <NavBtn v="people" icon="users" label="People" />
+        <NavBtn v="social" icon="chat" label="Social" />
+        <NavBtn v="moods" icon="pulse" label="Moods" />
+        <NavBtn v="verse" icon="atom" label="Verse" />
+        <NavBtn v="play" icon="puzzle" label="Play" />
+      </div>
+    </div>
+  </div>
 );
 };
-
 
 // ==========================================
 // BOND COACH: PANEL + BACKEND CONNECTOR
@@ -11069,3 +16098,17 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </Sentry.ErrorBoundary>
   </React.StrictMode>
 );
+// Replace your code with this
+window.addEventListener('load', () => {
+  document.addEventListener('click', (e) => {
+    const element = e.target
+    
+    if(typeof gtag !== 'undefined') { // make sure GA loaded
+      gtag('event', 'click', {
+        event_category: element.tagName,
+        event_label: element.innerText?.slice(0, 50), // limit text length
+        page: window.location.pathname
+      })
+    }
+  })
+})

@@ -1,70 +1,107 @@
 /* =========================================================
-   BOND OS — CANONICAL STYLESHEET (LOCKED & SAFE)
+   BOND OS — CANONICAL STYLESHEET v2 (SOCIAL BLEND)
+   Mix: 30% LinkedIn · 30% Instagram · 25% Facebook · 15% Reddit
    Purpose: App-like UX, no scroll bleed, no blank screen
-========================================================= */
+   ========================================================= */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
+/* ── GOOGLE FONTS (DM Sans — neutral authority, not generic) ── */
+
+
+:root {
+  --bg-main: #000000;     /* keep background pitch black */
+  --bg-surface: #0f172a;  /* 🔥 CHANGE THIS LINE ONLY */
+--bg-surface-soft: #0a0a0a;
+--bg-surface-warm: #0a0a0a;
+--text-primary:    #ffffff;
+--text-secondary:  #e5e7eb;
+  /* ===== BACKGROUND SYSTEM (kept dark — brand stays) ===== */
+
+--text-muted:      #a0aec0;   /* new: Reddit meta / timestamps */
+
+  /* ===== BORDERS ===== */
+  --border-default:  #2D3748;   /* slightly softer than before */
+  --border-subtle:   #1F2D40;   /* new: card inner dividers */
+
+  /* ===== PRIMARY — LinkedIn Blue (trust-forward) ===== */
+  --color-primary:       #0A66C2;   /* shifted from #2563EB → LI blue */
+  --color-primary-hover: #004182;
+  --color-primary-glow:  rgba(10, 102, 194, 0.22);
+
+  /* ===== INSTAGRAM RING GRADIENT ===== */
+  --ig-ring: linear-gradient(135deg, #833ab4 0%, #fd1d1d 50%, #fcb045 100%);
+
+  /* ===== REDDIT ORANGE ===== */
+  --reddit-vote:     #FF4500;
+  --reddit-vote-muted: rgba(255, 69, 0, 0.12);
+
+  /* ===== SEMANTIC ===== */
+  --color-success:   #10B981;
+  --color-danger:    #EF4444;
+  --color-warning:   #F59E0B;
+
+  /* ===== EFFECTS ===== */
+  --shadow-soft:     0 4px 14px rgba(0,0,0,0.28);
+  --shadow-card:     0 2px 8px rgba(0,0,0,0.22);   /* LinkedIn card lift */
+  --shadow-card-hover: 0 6px 20px rgba(0,0,0,0.36);
+
+  /* ===== SPACING & SHAPE ===== */
+  --radius-sm:   8px;
+  --radius-md:   12px;
+  --radius-lg:   18px;
+  --radius-pill: 999px;
+  --card-pad:    12px 16px;
+
+  /* ===== TYPOGRAPHY ===== */
+  --font-base: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ── CHANGE #1: Global font → DM Sans ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  font-family: var(--font-base);
+}
 
 /* ===============================
-   GLOBAL ROOT & SAFETY NET
+   ANIMATIONS
 ================================ */
-
-html,
-body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  position: relative;
-  z-index: 0;
-
-  /* App-like behavior */
-  overflow: hidden;
-
-  /* Mobile stability */
-  -webkit-text-size-adjust: 100%;
-  touch-action: manipulation;
-
-  font-family: system-ui, -apple-system, BlinkMacSystemFont,
-    "SF Pro Text", ui-sans-serif, "Segoe UI", sans-serif;
-}
 @keyframes pulseSlow {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.8; }
+  50%       { opacity: 0.8; }
 }
 @keyframes bond-skeleton-pulse {
   0%, 100% { opacity: 0.6; }
-  50%       { opacity: 1;   }
+  50%       { opacity: 1; }
 }
-.animate-pulseSlow {
-  animation: pulseSlow 2.6s ease-in-out infinite;
-}
-.coach-msg-thinking {
-  font-style: italic;
-  opacity: 0.75;
-  animation: coachPulse 1.2s ease-in-out infinite;
-}
-
 @keyframes coachPulse {
-  0% { opacity: 0.4; }
-  50% { opacity: 0.9; }
+  0%   { opacity: 0.4; }
+  50%  { opacity: 0.9; }
   100% { opacity: 0.4; }
 }
+/* NEW: Instagram story ring spin on hover */
+@keyframes ring-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+/* NEW: Reddit vote bounce */
+@keyframes vote-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+.animate-pulseSlow    { animation: pulseSlow 2.6s ease-in-out infinite; }
+.coach-msg-thinking   { font-style: italic; opacity: 0.75; animation: coachPulse 1.2s ease-in-out infinite; }
 
 /* ===============================
-   REACT ROOT (CRITICAL)
+   REACT ROOT (CRITICAL — unchanged)
 ================================ */
-
 #root {
   width: 100%;
-
-  /* 🔒 SAFETY NET — prevents invisible UI */
   min-height: 100vh;
   height: calc(var(--vh, 1vh) * 100);
-
   position: relative;
   z-index: 1;
-
   overflow: hidden;
-
-  /* Kill accidental stacking contexts */
   backdrop-filter: none !important;
   filter: none !important;
   transform: none !important;
@@ -74,277 +111,1534 @@ body {
 /* ===============================
    APP SHELL & SCROLL MODEL
 ================================ */
-
+.bond-feed-card {
+  border: 1px solid rgba(255,255,255,0.08);
+}
 .bond-app-shell {
-  position: fixed;
-  inset: 0;
-  margin: 0 auto;
-
-  width: 100%;
-  max-width: 28rem; /* mobile-first */
-
   display: flex;
   flex-direction: column;
-
-  z-index: 1;
+  height: 100dvh;        /* dvh handles mobile Safari address bar */
+  overflow: hidden;
+  position: fixed;       /* stops page-level scroll on iOS */
+  inset: 0;
+  max-width: 448px;
+  margin: 0 auto;
 }
-
+.bond-main::-webkit-scrollbar       { width: 4px; }
+.bond-main::-webkit-scrollbar-thumb { background: #2D3748; border-radius: var(--radius-pill); }
 .bond-main {
-  flex: 1 1 auto;
-  min-height: 0;
-
+  flex: 1;
+  min-height: 0;         /* without this, flex children ignore overflow */
   overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  -webkit-overflow-scrolling: touch;  /* smooth scroll on iOS */
 }
 
-.bond-bottom-shell {
-  flex: 0 0 auto;
-  padding-bottom: env(safe-area-inset-bottom);
+.bond-bottom-shell { flex: 0 0 auto; padding-bottom: env(safe-area-inset-bottom); }
+.focus-ring:focus  { outline: none; box-shadow: 0 0 0 2px rgba(10, 102, 194, 0.4); }
+
+/* ===============================
+   BRAND UTILITY CLASSES (token-based)
+================================ */
+.bg-bondBg          {
+  
+  background: #000000;
+
+
+  background-attachment: fixed;
+} 
+.bg-bondSurface     { background: var(--bg-surface); box-shadow: var(--shadow-card); }
+.bg-bondSurfaceSoft { background: var(--bg-surface-soft); }
+.bg-bondSurfaceWarm { background: var(--bg-surface-warm); }
+
+
+.text-bondMuted  { color: var(--text-secondary); }
+
+.text-bondText {
+  color: #E5E7EB;
+}
+
+.text-bondMeta {
+  color: #ffffff;  /* was #9CA3AF */
+  font-size: 11px;
+}
+.text-bondAccent { color: var(--color-primary); }
+.text-bondMint   { color: var(--color-success); }
+.text-bondDanger { color: var(--color-danger); }
+
+.border-bondBorder { border-color: var(--border-default); }
+
+/* ── CHANGE #2: card-hover → LinkedIn lift feel ── */
+.card-hover {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card-hover);
 }
 
 /* ===============================
-   BRAND COLORS & UTILITIES
+   ★ NEW: FEED CARD (LinkedIn 30%)
+   Use for profile cards, bond cards, discovery cards
 ================================ */
-
-.bg-bondBg {
-  background: radial-gradient(
-    circle at top,
-    #020617 0%,
-    #020617 40%,
-    #020617 100%
-  );
+.bond-feed-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.18s ease;
+  overflow: hidden;
+}
+.bond-feed-card:hover {
+  border: 1px solid rgba(10, 102, 194, 0.35);
+}
+/* Card sections */
+.bond-feed-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: var(--card-pad);
+}
+.bond-feed-card__body  { padding: 0 16px 12px; }
+.bond-feed-card__footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-subtle);
 }
 
-.bg-bondSurface {
-  background: rgba(15, 23, 42, 0.98);
+/* LinkedIn-style connection meta: "2nd · 3h ago" */
+.bond-connection-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
 }
-
-.bg-bondSurfaceSoft {
-  background: rgba(15, 23, 42, 0.9);
-}
-
-.text-bondText { color: #e5e7eb; }
-.text-bondMuted { color: #9ca3af; }
-.text-bondAccent { color: #fb7185; }
-.text-bondMint { color: #7bf0c9; }
-.text-bondDanger { color: #f97373; }
-
-.border-bondBorder {
-  border-color: rgba(148, 163, 184, 0.4);
+.bond-connection-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  display: inline-block;
 }
 
 /* ===============================
-   AI ORB (FLOATING LAUNCH)
+   ★ NEW: STORY RING (Instagram 30%)
+   Wrap any avatar with .bond-story-ring
 ================================ */
+.bond-story-ring {
+  padding: 2.5px;
+  border-radius: var(--radius-pill);
+  background: var(--ig-ring);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+.bond-story-ring:hover { transform: scale(1.06); }
+/* The inner avatar must have a bg-match border */
+.bond-story-ring__inner {
+  border-radius: var(--radius-pill);
+  border: 2.5px solid var(--bg-surface);
+  display: block;
+  overflow: hidden;
+}
+/* Seen state — grey ring */
+.bond-story-ring--seen {
+  background: var(--border-default);
+}
 
+/* Story strip container (horizontal scroll) */
+.bond-stories-strip {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding: 10px 16px;
+  scrollbar-width: none;
+}
+.bond-stories-strip::-webkit-scrollbar { display: none; }
+.bond-story-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.bond-story-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  max-width: 52px;
+  text-align: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ===============================
+   ★ NEW: REACTION BAR (Facebook 25%)
+   Use at bottom of feed cards
+================================ */
+.bond-reaction-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.bond-reaction-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 0;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.bond-reaction-btn:hover {
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+}
+.bond-reaction-btn--active { color: var(--color-primary); }
+.bond-reaction-btn--liked  { color: var(--color-danger); }
+
+/* Emoji cluster (FB-style "12 people reacted") */
+.bond-reaction-cluster {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 6px 16px;
+}
+.bond-reaction-emoji {
+  font-size: 13px;
+  line-height: 1;
+}
+.bond-reaction-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ===============================
+   ★ NEW: VOTE COLUMN (Reddit 15%)
+   Use for ranked/scored content (Bond Score, compatibility rank)
+================================ */
+.bond-vote-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  flex-shrink: 0;
+}
+.bond-vote-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.bond-vote-btn:hover               { background: var(--reddit-vote-muted); color: var(--reddit-vote); }
+.bond-vote-btn--up.active          { color: var(--reddit-vote); animation: vote-pop 0.25s ease; }
+.bond-vote-btn--down.active        { color: var(--color-primary); animation: vote-pop 0.25s ease; }
+.bond-vote-score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 28px;
+  text-align: center;
+}
+
+/* Reddit-style community / tag pills */
+.bond-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border-default);
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.bond-tag-pill:hover {
+  background: rgba(10, 102, 194, 0.12);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.bond-tag-pill--active {
+  background: rgba(10, 102, 194, 0.18);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* Reddit compact row card (text-forward content) */
+.bond-reddit-row {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  transition: background 0.15s ease;
+}
+.bond-reddit-row:hover { background: var(--bg-surface-soft); }
+.bond-reddit-row__content {
+  flex: 1;
+  padding: 10px 12px 10px 0;
+}
+.bond-reddit-row__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+.bond-reddit-row__meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ===============================
+   ★ NEW: AVATAR (multi-platform)
+================================ */
+.bond-avatar {
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.bond-avatar--sm  { width: 32px; height: 32px; font-size: 12px; }
+.bond-avatar--md  { width: 40px; height: 40px; font-size: 15px; }
+.bond-avatar--lg  { width: 52px; height: 52px; font-size: 18px; }
+.bond-avatar--xl  { width: 72px; height: 72px; font-size: 24px; }
+
+/* LinkedIn-style "Online" indicator */
+.bond-avatar-wrap { position: relative; display: inline-flex; }
+.bond-online-dot {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-success);
+  border: 2px solid var(--bg-surface);
+}
+
+/* ===============================
+   ★ NEW: LINKEDIN-STYLE PROFILE HEADLINE
+================================ */
+.bond-profile-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bond-profile-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+.bond-profile-tagline {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.bond-profile-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ===============================
+   ★ NEW: CONNECT / FOLLOW BUTTON
+   LinkedIn + Instagram hybrid CTA
+================================ */
+.bond-btn-connect {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--color-primary);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.bond-btn-connect:hover {
+  background: var(--color-primary);
+  color: #ffffff;
+}
+.bond-btn-connect--filled {
+  background: var(--color-primary);
+  color: #ffffff;
+}
+.bond-btn-connect--filled:hover {
+  background: var(--color-primary-hover);
+}
+
+/* Message / secondary CTA */
+.bond-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--border-default);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.bond-btn-secondary:hover {
+  background: rgba(255,255,255,0.04);
+  border-color: var(--text-secondary);
+}
+
+/* ===============================
+   ★ NEW: FEED SECTION HEADER (LinkedIn "Suggested" / Reddit "r/")
+================================ */
+.bond-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px 6px;
+}
+.bond-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+.bond-section-action {
+  font-size: 12px;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 500;
+}
+.bond-section-action:hover { text-decoration: underline; }
+
+/* ===============================
+   ★ NEW: COMMENT / REPLY THREAD (Facebook-style nesting)
+================================ */
+.bond-comment-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.bond-comment {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+}
+.bond-comment__body {
+  flex: 1;
+  background: var(--bg-surface-soft);
+  border-radius: 0 var(--radius-md) var(--radius-md) var(--radius-md);
+  padding: 8px 10px;
+}
+.bond-comment__author {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.bond-comment__text  { font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
+.bond-comment__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 5px;
+}
+.bond-comment__action-btn {
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-weight: 500;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.bond-comment__action-btn:hover { color: var(--color-primary); }
+
+/* Nested reply indent */
+.bond-comment--reply {
+  padding-left: 52px;
+}
+.bond-comment--reply .bond-comment__body {
+  background: rgba(255,255,255,0.03);
+}
+
+/* ===============================
+   ★ NEW: NOTIFICATION BADGE (Facebook)
+================================ */
+.bond-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--color-danger);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+.bond-badge--primary { background: var(--color-primary); }
+.bond-badge--muted   { background: var(--bg-surface-soft); color: var(--text-secondary); }
+
+/* ===============================
+   ★ NEW: KARMA / BOND SCORE CHIP (Reddit-style)
+================================ */
+.bond-score-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--reddit-vote-muted);
+  border: 1px solid rgba(255,69,0,0.2);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--reddit-vote);
+}
+
+/* ===============================
+   AI ORB (clean trust version — LinkedIn blue updated)
+================================ */
 .bond-ai-orb {
   position: fixed;
   right: 1.5rem;
   bottom: 4.5rem;
-
   width: 3rem;
   height: 3rem;
-  border-radius: 999px;
-
-  background: radial-gradient(
-    circle at 30% 0%,
-    #f97316,
-    #fb7185,
-    #22d3ee
-  );
-
-  box-shadow: 0 0 25px rgba(251, 113, 133, 0.7);
-  border: 1px solid rgba(248, 250, 252, 0.25);
-
+  border-radius: var(--radius-pill);
+  background: var(--color-primary);
+  box-shadow: var(--shadow-soft);
   display: flex;
   align-items: center;
   justify-content: center;
-
   cursor: pointer;
   z-index: 1000;
-
-  transition:
-    bottom 0.25s ease,
-    transform 0.2s ease,
-    box-shadow 0.2s ease,
-    opacity 0.2s ease;
+  transition: bottom 0.25s ease, transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
 }
-
-.bond-ai-orb--raised {
-  bottom: 9.5rem;
-  opacity: 0.85;
-}
-
+.bond-ai-orb--raised { bottom: 9.5rem; opacity: 0.9; }
 .bond-ai-orb:hover {
-  transform: translateY(-2px) scale(1.05);
-  box-shadow: 0 0 32px rgba(251, 113, 133, 0.9);
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 10px 22px var(--color-primary-glow);
 }
 
 /* ===============================
-   AI COACH (DOMINANT OVERLAY)
+   AI COACH PANEL (dominant overlay)
 ================================ */
-
 #bondCoach {
   position: fixed !important;
-
   bottom: 24px;
   right: 24px;
-
   z-index: 2147483647 !important;
-
   isolation: isolate;
   contain: none !important;
   transform: none !important;
   filter: none !important;
-
   pointer-events: auto;
 }
-
 #bondCoach.coach-maximized {
   top: 16px !important;
   left: 16px !important;
   right: 16px !important;
   bottom: 16px !important;
 }
-
-/* Panel */
 .bond-coach-panel {
   width: 360px;
   max-height: 420px;
-
-  background: #020617;
-  border-radius: 18px;
-  border: 1px solid rgba(148, 163, 184, 0.6);
-  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.9);
-
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-default);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.35);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-
-/* Header */
 .bond-coach-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-
   padding: 8px 12px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.4);
-
-  background: radial-gradient(
-    circle at top left,
-    rgba(251, 113, 133, 0.25),
-    transparent
-  );
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-surface-soft);
 }
-
 .bond-coach-title {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #e5e7eb;
+  color: var(--text-primary);
 }
-
 .bond-coach-actions button {
   background: transparent;
   border: none;
-  color: #9ca3af;
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 14px;
 }
-
-/* Messages */
 .bond-coach-messages {
   flex: 1;
   padding: 8px 10px;
   overflow-y: auto;
   font-size: 12px;
 }
-
 .coach-msg {
   margin-bottom: 6px;
   max-width: 85%;
   padding: 6px 8px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   line-height: 1.35;
 }
-
 .coach-msg-user {
   margin-left: auto;
-  background: linear-gradient(to right, #fb7185, #facc15);
-  color: #020617;
+  background: var(--color-primary);
+  color: #ffffff;
   border-bottom-right-radius: 4px;
 }
-
 .coach-msg-bot {
   margin-right: auto;
-  background: #020617;
-  border: 1px solid rgba(148, 163, 184, 0.5);
-  color: #e5e7eb;
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
   border-bottom-left-radius: 4px;
 }
-
-/* Input */
 .bond-coach-input-row {
-  display: flex;
-  border-top: 1px solid rgba(148, 163, 184, 0.4);
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-.bond-coach-input {
   flex: 1;
   padding: 8px 10px;
   border: none;
-  background: #020617;
-  color: #e5e7eb;
+  background: var(--bg-surface-soft);
+  color: var(--text-primary);
   resize: none;
   font-size: 12px;
   outline: none;
 }
-
+.bond-coach-input {
+  display: flex;
+  border-top: 1px solid var(--border-default);
+  padding-bottom: env(safe-area-inset-bottom);
+}
 .bond-coach-send {
   border: none;
   padding: 0 14px;
   margin: 6px;
-  border-radius: 999px;
-
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-
-  background: linear-gradient(to right, #fb7185, #facc15);
-  color: #020617;
+  background: var(--color-primary);
+  color: white;
+  transition: background 0.2s ease;
 }
+.bond-coach-send:hover { background: var(--color-primary-hover); }
 
 /* ===============================
    BACKDROP WHEN COACH MAXIMIZED
 ================================ */
-
 body.coach-dim::before {
   content: "";
   position: fixed;
   inset: 0;
-
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(4px);
-
+  background: rgba(2,6,23,0.55);
+  backdrop-filter: blur(6px);
   z-index: 2147483646;
 }
 
 /* ===============================
-   STATIC HERO (LANDING / MARKETING)
+   STATIC HERO (landing / marketing)
 ================================ */
+.bg-bondBg {
+  
+  background: #000000;
 
+
+  background-attachment: fixed;
+}
 #static-hero {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   justify-content: center;
-
   padding: 2rem;
-  background: #171810;
-  color: #ffffff;
+  color: var(--text-primary);
+  font-family: var(--font-base);
+}
 
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+/* ===============================
+   SCROLLBAR (site-wide)
+================================ */
+::-webkit-scrollbar       { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: var(--radius-pill); }/* =========================================================
+   BOND OS — CANONICAL STYLESHEET v2 (SOCIAL BLEND)
+   Mix: 30% LinkedIn · 30% Instagram · 25% Facebook · 15% Reddit
+   Purpose: App-like UX, no scroll bleed, no blank screen
+   ========================================================= */
+
+
+:root {
+  /* ===== BACKGROUND SYSTEM (kept dark — brand stays) ===== */
+  --bg-main:         #0B1220;
+  --bg-surface:      #111827;
+  --bg-surface-soft: #1A2235;   /* warmer than before — Facebook warmth */
+  --bg-surface-warm: #1E2A3A;   /* new: Facebook feed card base */
+
+  /* ===== TEXT ===== */
+  --text-primary:    #E5E7EB;
+--text-secondary:  #e5e7eb;
+  
+  --text-muted:      #a0aec0;   /* new: Reddit meta / timestamps */
+
+  /* ===== BORDERS ===== */
+  --border-default:  #2D3748;   /* slightly softer than before */
+  --border-subtle:   #1F2D40;   /* new: card inner dividers */
+
+  /* ===== PRIMARY — LinkedIn Blue (trust-forward) ===== */
+  --color-primary:       #0A66C2;   /* shifted from #2563EB → LI blue */
+  --color-primary-hover: #004182;
+  --color-primary-glow:  rgba(10, 102, 194, 0.22);
+
+  /* ===== INSTAGRAM RING GRADIENT ===== */
+  --ig-ring: linear-gradient(135deg, #833ab4 0%, #fd1d1d 50%, #fcb045 100%);
+
+  /* ===== REDDIT ORANGE ===== */
+  --reddit-vote:     #FF4500;
+  --reddit-vote-muted: rgba(255, 69, 0, 0.12);
+
+  /* ===== SEMANTIC ===== */
+  --color-success:   #10B981;
+  --color-danger:    #EF4444;
+  --color-warning:   #F59E0B;
+
+  /* ===== EFFECTS ===== */
+  --shadow-soft:     0 4px 14px rgba(0,0,0,0.28);
+  --shadow-card:     0 2px 8px rgba(0,0,0,0.22);   /* LinkedIn card lift */
+  --shadow-card-hover: 0 6px 20px rgba(0,0,0,0.36);
+
+  /* ===== SPACING & SHAPE ===== */
+  --radius-sm:   8px;
+  --radius-md:   12px;
+  --radius-lg:   18px;
+  --radius-pill: 999px;
+  --card-pad:    12px 16px;
+
+  /* ===== TYPOGRAPHY ===== */
+  --font-base: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ── CHANGE #1: Global font → DM Sans ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  font-family: var(--font-base);
+}
+
+/* ===============================
+   ANIMATIONS
+================================ */
+@keyframes pulseSlow {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.8; }
+}
+@keyframes bond-skeleton-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
+}
+@keyframes coachPulse {
+  0%   { opacity: 0.4; }
+  50%  { opacity: 0.9; }
+  100% { opacity: 0.4; }
+}
+/* NEW: Instagram story ring spin on hover */
+@keyframes ring-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+/* NEW: Reddit vote bounce */
+@keyframes vote-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+.animate-pulseSlow    { animation: pulseSlow 2.6s ease-in-out infinite; }
+.coach-msg-thinking   { font-style: italic; opacity: 0.75; animation: coachPulse 1.2s ease-in-out infinite; }
+
+/* ===============================
+   REACT ROOT (CRITICAL — unchanged)
+================================ */
+#root {
+  width: 100%;
+  min-height: 100vh;
+  height: calc(var(--vh, 1vh) * 100);
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  backdrop-filter: none !important;
+  filter: none !important;
+  transform: none !important;
+  isolation: auto !important;
+}
+
+/* ===============================
+   APP SHELL & SCROLL MODEL
+================================ */
+.bond-app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;        /* dvh handles mobile Safari address bar */
+  overflow: hidden;
+  position: fixed;       /* stops page-level scroll on iOS */
+  inset: 0;
+  max-width: 448px;
+  margin: 0 auto;
+}
+.bond-main::-webkit-scrollbar       { width: 4px; }
+.bond-main::-webkit-scrollbar-thumb { background: #2D3748; border-radius: var(--radius-pill); }
+.bond-main {
+  flex: 1;
+  min-height: 0;         /* without this, flex children ignore overflow */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;  /* smooth scroll on iOS */
+}
+
+.bond-bottom-shell { flex: 0 0 auto; padding-bottom: env(safe-area-inset-bottom); }
+.focus-ring:focus  { outline: none; box-shadow: 0 0 0 2px rgba(10, 102, 194, 0.4); }
+
+/* ===============================
+   BRAND UTILITY CLASSES (token-based)
+================================ */
+.bg-bondBg {
+  background: #000000;
+}
+
+.bg-bondSurface {
+  border: 1px solid rgba(59, 130, 246, 0.25);  /* thin blue */
+}
+
+.bg-bondSurfaceSoft {
+  background: #0a0a0a;
+}
+.bg-bondSurfaceWarm { background: var(--bg-surface-warm); }
+
+.text-bondText   { color: var(--text-primary); }
+.text-bondMuted  { color: var(--text-secondary); }
+.text-bondMeta   { color: var(--text-muted); font-size: 11px; }
+.text-bondAccent { color: var(--color-primary); }
+.text-bondMint   { color: var(--color-success); }
+.text-bondDanger { color: var(--color-danger); }
+
+.border-bondBorder { border-color: var(--border-default); }
+
+/* ── CHANGE #2: card-hover → LinkedIn lift feel ── */
+.card-hover {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* ===============================
+   ★ NEW: FEED CARD (LinkedIn 30%)
+   Use for profile cards, bond cards, discovery cards
+================================ */
+.bond-feed-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.18s ease;
+  overflow: hidden;
+}
+.bond-feed-card:hover { box-shadow: var(--shadow-card-hover); }
+
+/* Card sections */
+.bond-feed-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: var(--card-pad);
+}
+.bond-feed-card__body  { padding: 0 16px 12px; }
+.bond-feed-card__footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* LinkedIn-style connection meta: "2nd · 3h ago" */
+.bond-connection-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.bond-connection-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  display: inline-block;
+}
+
+/* ===============================
+   ★ NEW: STORY RING (Instagram 30%)
+   Wrap any avatar with .bond-story-ring
+================================ */
+.bond-story-ring {
+  padding: 2.5px;
+  border-radius: var(--radius-pill);
+  background: var(--ig-ring);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+.bond-story-ring:hover { transform: scale(1.06); }
+/* The inner avatar must have a bg-match border */
+.bond-story-ring__inner {
+  border-radius: var(--radius-pill);
+  border: 2.5px solid var(--bg-surface);
+  display: block;
+  overflow: hidden;
+}
+/* Seen state — grey ring */
+.bond-story-ring--seen {
+  background: var(--border-default);
+}
+
+/* Story strip container (horizontal scroll) */
+.bond-stories-strip {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding: 10px 16px;
+  scrollbar-width: none;
+}
+.bond-stories-strip::-webkit-scrollbar { display: none; }
+.bond-story-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.bond-story-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  max-width: 52px;
+  text-align: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ===============================
+   ★ NEW: REACTION BAR (Facebook 25%)
+   Use at bottom of feed cards
+================================ */
+.bond-reaction-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.bond-reaction-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 0;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.bond-reaction-btn:hover {
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+}
+.bond-reaction-btn--active { color: var(--color-primary); }
+.bond-reaction-btn--liked  { color: var(--color-danger); }
+
+/* Emoji cluster (FB-style "12 people reacted") */
+.bond-reaction-cluster {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 6px 16px;
+}
+.bond-reaction-emoji {
+  font-size: 13px;
+  line-height: 1;
+}
+.bond-reaction-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ===============================
+   ★ NEW: VOTE COLUMN (Reddit 15%)
+   Use for ranked/scored content (Bond Score, compatibility rank)
+================================ */
+.bond-vote-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  flex-shrink: 0;
+}
+.bond-vote-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.bond-vote-btn:hover               { background: var(--reddit-vote-muted); color: var(--reddit-vote); }
+.bond-vote-btn--up.active          { color: var(--reddit-vote); animation: vote-pop 0.25s ease; }
+.bond-vote-btn--down.active        { color: var(--color-primary); animation: vote-pop 0.25s ease; }
+.bond-vote-score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 28px;
+  text-align: center;
+}
+
+/* Reddit-style community / tag pills */
+.bond-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border-default);
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.bond-tag-pill:hover {
+  background: rgba(10, 102, 194, 0.12);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.bond-tag-pill--active {
+  background: rgba(10, 102, 194, 0.18);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* Reddit compact row card (text-forward content) */
+.bond-reddit-row {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  transition: background 0.15s ease;
+}
+.bond-reddit-row:hover { background: var(--bg-surface-soft); }
+.bond-reddit-row__content {
+  flex: 1;
+  padding: 10px 12px 10px 0;
+}
+.bond-reddit-row__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+.bond-reddit-row__meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ===============================
+   ★ NEW: AVATAR (multi-platform)
+================================ */
+.bond-avatar {
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.bond-avatar--sm  { width: 32px; height: 32px; font-size: 12px; }
+.bond-avatar--md  { width: 40px; height: 40px; font-size: 15px; }
+.bond-avatar--lg  { width: 52px; height: 52px; font-size: 18px; }
+.bond-avatar--xl  { width: 72px; height: 72px; font-size: 24px; }
+
+/* LinkedIn-style "Online" indicator */
+.bond-avatar-wrap { position: relative; display: inline-flex; }
+.bond-online-dot {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-success);
+  border: 2px solid var(--bg-surface);
+}
+
+/* ===============================
+   ★ NEW: LINKEDIN-STYLE PROFILE HEADLINE
+================================ */
+.bond-profile-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bond-profile-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+.bond-profile-tagline {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.bond-profile-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ===============================
+   ★ NEW: CONNECT / FOLLOW BUTTON
+   LinkedIn + Instagram hybrid CTA
+================================ */
+.bond-btn-connect {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--color-primary);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.bond-btn-connect:hover {
+  background: var(--color-primary);
+  color: #ffffff;
+}
+.bond-btn-connect--filled {
+  background: var(--color-primary);
+  color: #ffffff;
+}
+.bond-btn-connect--filled:hover {
+  background: var(--color-primary-hover);
+}
+
+/* Message / secondary CTA */
+.bond-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--border-default);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.bond-btn-secondary:hover {
+  background: rgba(255,255,255,0.04);
+  border-color: var(--text-secondary);
+}
+
+/* ===============================
+   ★ NEW: FEED SECTION HEADER (LinkedIn "Suggested" / Reddit "r/")
+================================ */
+.bond-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px 6px;
+}
+.bond-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+.bond-section-action {
+  font-size: 12px;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 500;
+}
+.bond-section-action:hover { text-decoration: underline; }
+
+/* ===============================
+   ★ NEW: COMMENT / REPLY THREAD (Facebook-style nesting)
+================================ */
+.bond-comment-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.bond-comment {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+}
+.bond-comment__body {
+  flex: 1;
+  background: var(--bg-surface-soft);
+  border-radius: 0 var(--radius-md) var(--radius-md) var(--radius-md);
+  padding: 8px 10px;
+}
+.bond-comment__author {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.bond-comment__text  { font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
+.bond-comment__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 5px;
+}
+.bond-comment__action-btn {
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-weight: 500;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.bond-comment__action-btn:hover { color: var(--color-primary); }
+
+/* Nested reply indent */
+.bond-comment--reply {
+  padding-left: 52px;
+}
+.bond-comment--reply .bond-comment__body {
+  background: rgba(255,255,255,0.03);
+}
+
+/* ===============================
+   ★ NEW: NOTIFICATION BADGE (Facebook)
+================================ */
+.bond-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--color-danger);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+.bond-badge--primary { background: var(--color-primary); }
+.bond-badge--muted   { background: var(--bg-surface-soft); color: var(--text-secondary); }
+
+/* ===============================
+   ★ NEW: KARMA / BOND SCORE CHIP (Reddit-style)
+================================ */
+.bond-score-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--reddit-vote-muted);
+  border: 1px solid rgba(255,69,0,0.2);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--reddit-vote);
+}
+
+/* ===============================
+   AI ORB (clean trust version — LinkedIn blue updated)
+================================ */
+.bond-ai-orb {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 4.5rem;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary);
+  box-shadow: var(--shadow-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1000;
+  transition: bottom 0.25s ease, transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+.bond-ai-orb--raised { bottom: 9.5rem; opacity: 0.9; }
+.bond-ai-orb:hover {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 10px 22px var(--color-primary-glow);
+}
+
+/* ===============================
+   AI COACH PANEL (dominant overlay)
+================================ */
+#bondCoach {
+  position: fixed !important;
+  bottom: 24px;
+  right: 24px;
+  z-index: 2147483647 !important;
+  isolation: isolate;
+  contain: none !important;
+  transform: none !important;
+  filter: none !important;
+  pointer-events: auto;
+}
+#bondCoach.coach-maximized {
+  top: 16px !important;
+  left: 16px !important;
+  right: 16px !important;
+  bottom: 16px !important;
+}
+.bond-coach-panel {
+  width: 360px;
+  max-height: 420px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-default);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.bond-coach-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-surface-soft);
+}
+.bond-coach-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+.bond-coach-actions button {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+}
+.bond-coach-messages {
+  flex: 1;
+  padding: 8px 10px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.coach-msg {
+  margin-bottom: 6px;
+  max-width: 85%;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  line-height: 1.35;
+}
+.coach-msg-user {
+  margin-left: auto;
+  background: var(--color-primary);
+  color: #ffffff;
+  border-bottom-right-radius: 4px;
+}
+.coach-msg-bot {
+  margin-right: auto;
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  border-bottom-left-radius: 4px;
+}
+.bond-coach-input-row {
+  flex: 1;
+  padding: 8px 10px;
+  border: none;
+  background: var(--bg-surface-soft);
+  color: var(--text-primary);
+  resize: none;
+  font-size: 12px;
+  outline: none;
+}
+.bond-coach-input {
+  display: flex;
+  border-top: 1px solid var(--border-default);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.bond-coach-send {
+  border: none;
+  padding: 0 14px;
+  margin: 6px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--color-primary);
+  color: white;
+  transition: background 0.2s ease;
+}
+.bond-coach-send:hover { background: var(--color-primary-hover); }
+
+/* ===============================
+   BACKDROP WHEN COACH MAXIMIZED
+================================ */
+body.coach-dim::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(2,6,23,0.55);
+  backdrop-filter: blur(6px);
+  z-index: 2147483646;
+}
+
+/* ===============================
+   STATIC HERO (landing / marketing)
+================================ */
+#static-hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 2rem;
+.bg-bondBg {
+  background: #000000;
+}
+
+  color: var(--text-primary);
+  font-family: var(--font-base);
+}
+.bond-score-label {
+  color: #ffffff;
+  font-weight: 700;
+}
+/* ===============================
+   SCROLLBAR (site-wide)
+================================ */
+::-webkit-scrollbar       { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: var(--radius-pill); }
+
+.bg-bondSurface {
+  background: #0f172a !important;
+}
+/* ==========================================
+   BONDOS OVERRIDE PATCH — PASTE AT END
+   ========================================== */
+
+/* Dark bluish card background */
+.bg-bondSurface,
+.bg-bondSurfaceSoft,
+.bg-bondSurfaceWarm {
+  background: #0d1929 !important;
+  border: 1px solid rgba(10, 102, 194, 0.38) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+}
+
+/* Blue outline on ALL feed cards */
+.bond-feed-card {
+  background: #0d1929 !important;
+  border: 1px solid rgba(10, 102, 194, 0.38) !important;
+}
+
+.bond-feed-card:hover {
+  border: 1px solid rgba(10, 102, 194, 0.65) !important;
+  box-shadow: 0 6px 24px rgba(10, 102, 194, 0.15);
+}
+
+/* All card-hover elements get blue outline */
+.card-hover {
+  border: 1px solid rgba(10, 102, 194, 0.30) !important;
+  background: #0d1929 !important;
+}
+
+/* Faded text → white */
+.text-bondMuted {
+  color: #e5e7eb !important;
+}
+
+.text-bondText,
+.text-bondMeta {
+  color: #ffffff !important;
 }

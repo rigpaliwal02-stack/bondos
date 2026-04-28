@@ -1,0 +1,94 @@
+name: BondOS Full Load Test – Social + People (1000 VUs)
+
+on:
+  workflow_dispatch:
+    inputs:
+      vus:
+        description: 'Virtual users (concurrent)'
+        required: false
+        default: '1000'
+      duration:
+        description: 'Test duration (e.g. 5m, 10m)'
+        required: false
+        default: '10m'
+      scenario:
+        description: |
+          all | people_feed | people_profile | character_review |
+          fight_for_people | fp_vote | couple_feed | couple_reactions |
+          couple_comments | couple_challenges | couple_status |
+          ship_it | ship_vote | community_photos | search
+        required: false
+        default: 'all'
+
+jobs:
+  load-test:
+    name: BondOS Load Test – Social & People (${{ github.event.inputs.vus }} VUs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring \
+            --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] \
+            https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -qq && sudo apt-get install -y k6
+
+      - name: Validate secrets
+        run: |
+          [ -z "${{ secrets.SUPABASE_URL }}" ]      && echo "SUPABASE_URL missing"      && exit 1 || true
+          [ -z "${{ secrets.SUPABASE_ANON_KEY }}" ] && echo "SUPABASE_ANON_KEY missing" && exit 1 || true
+          echo "Secrets OK"
+
+      - name: Create results dir
+        run: mkdir -p results
+
+      - name: Run load tests
+        env:
+          SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          K6_VUS:            ${{ github.event.inputs.vus }}
+          K6_DURATION:       ${{ github.event.inputs.duration }}
+          K6_SCENARIO:       ${{ github.event.inputs.scenario }}
+        run: |
+          k6 run \
+            --vus      "$K6_VUS" \
+            --duration "$K6_DURATION" \
+            --env SUPABASE_URL="$SUPABASE_URL" \
+            --env SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+            --env SCENARIO="$K6_SCENARIO" \
+            --out json=results/raw.json \
+            --summary-export results/thresholds.json \
+            k6/main.js
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bondos-results-${{ github.run_number }}
+          path: results/
+          retention-days: 30
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## BondOS Load Test Run #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Virtual Users | ${{ github.event.inputs.vus }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Duration | ${{ github.event.inputs.duration }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Scenario | ${{ github.event.inputs.scenario }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tabs | People + Social only |" >> $GITHUB_STEP_SUMMARY
+          if [ -f results/thresholds.json ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Thresholds" >> $GITHUB_STEP_SUMMARY
+            cat results/thresholds.json >> $GITHUB_STEP_SUMMARY
+          fi
