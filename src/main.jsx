@@ -157,6 +157,27 @@ img.src = e.target.result;
 reader.readAsDataURL(file);
 });
 }
+const saveGuestProfile = (name) => {
+  const guestId =
+    localStorage.getItem("bond_guest_uuid") || crypto.randomUUID();
+
+  localStorage.setItem("bond_guest_uuid", guestId);
+
+  const profileData = {
+    id: guestId,
+    username: name,
+    display_name: name,
+    updated_at: new Date().toISOString(),
+  };
+
+  localStorage.setItem("bond_guest_profile", JSON.stringify(profileData));
+
+  console.log("[GUEST PROFILE SAVED LOCALLY]", profileData);
+
+  return profileData;
+};
+
+
 /* =====================================================
 APP SHELL — SINGLE SOURCE OF UI TRUTH
 ===================================================== */
@@ -713,6 +734,15 @@ idealGeo: null,             // optional geo/context input
   roadmap: [],
   objective: "",
 
+  moodState: "feed",
+selectedMoodProfile: null,
+moodDraft: {
+  mood: null,
+  reason: "",
+  tags: [],
+  isAnonymous: true,
+},
+
   partnerCloneState: "intro",
   partnerCloneAnswers: [],
   partnerCloneProfile: null,
@@ -743,6 +773,7 @@ if (e.key === "Escape" && isCoachMaximized) {
 toggleCoachMaximize("escape_key");
 }
 });
+
 function toggleCoachMaximize(source = "manual") {
 const coach = document.getElementById("bondCoach");
 if (!coach) return;
@@ -773,7 +804,751 @@ sessionId: getSessionId()
 coachMaximizedAt = null;
 }
 }
+const MOODS = [
+  { key: "happy", label: "Happy", emoji: "😊", score: 2 },
+  { key: "excited", label: "Excited", emoji: "🤩", score: 2 },
+  { key: "calm", label: "Calm", emoji: "😌", score: 2 },
+  { key: "chill", label: "Chill", emoji: "😎", score: 1 },
+  { key: "normal", label: "Normal", emoji: "🙂", score: 1 },
+  { key: "confused", label: "Confused", emoji: "😶‍🌫️", score: 0 },
+  { key: "low_energy", label: "Low Energy", emoji: "🪫", score: 0 },
+  { key: "sad", label: "Sad", emoji: "😔", score: -1 },
+  { key: "stressed", label: "Stressed", emoji: "😵‍💫", score: -1 },
+  { key: "angry", label: "Angry", emoji: "😤", score: -2 }
+];
 
+const REASON_TAGS = [
+  "College",
+  "Work",
+  "Friends",
+  "Family",
+  "Relationship",
+  "Exam",
+  "Health",
+  "Drama",
+  "Win",
+  "Unknown"
+];
+async function submitProfileMood({
+  targetUserId,
+  reviewerUserId,
+  mood,
+  reason,
+  tags = [],
+  isAnonymous = true,
+}) {
+  const moodObj = MOODS.find((m) => m.key === mood);
+  if (!moodObj) throw new Error("Invalid mood");
+
+  const { data, error } = await supabase
+    .from("profile_moods")
+    .insert({
+      target_user_id: targetUserId,
+      reviewer_user_id: reviewerUserId,
+      mood,
+      mood_score: moodObj.score,
+      reason,
+      reason_tags: tags,
+      is_anonymous: isAnonymous,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function fetchProfileMoods(targetUserId) {
+  const { data, error } = await supabase
+    .from("profile_moods")
+    .select("*")
+    .eq("target_user_id", targetUserId)
+    .order("created_at", { ascending: false })
+    .limit(30);
+
+  if (error) throw error;
+  return data;
+}
+
+async function fetchTodayMoodSummary(targetUserId) {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data, error } = await supabase
+    .from("profile_moods")
+    .select("*")
+    .eq("target_user_id", targetUserId)
+    .eq("mood_date", today);
+
+  if (error) throw error;
+
+  const avg =
+    data.length > 0
+      ? data.reduce((s, m) => s + Number(m.mood_score), 0) / data.length
+      : 0;
+
+  const topMood = data[0]?.mood || "none";
+
+  return {
+    avgMoodScore: avg,
+    totalEntries: data.length,
+    topMood,
+    entries: data,
+  };
+}
+
+const MoodTab = ({ profile, currentUser }) => {
+  const [selectedMood, setSelectedMood] = useState(null);
+  const [reason, setReason] = useState("");
+  const [tags, setTags] = useState([]);
+  const [isAnonymous, setIsAnonymous] = useState(true);
+  const [moods, setMoods] = useState([]);
+
+  useEffect(() => {
+    if (profile?.id) {
+      fetchProfileMoods(profile.id).then(setMoods).catch(console.error);
+    }
+  }, [profile?.id]);
+
+  const submitMood = async () => {
+    if (!selectedMood || !profile?.id || !currentUser?.id) return;
+
+    await submitProfileMood({
+      targetUserId: profile.id,
+      reviewerUserId: currentUser.id,
+      mood: selectedMood,
+      reason,
+      tags,
+      isAnonymous,
+    });
+await supabase.from("notifications").insert({
+  user_id: profile.id,
+  profile_id: currentUser.id,
+  type: "mood_added",
+  message: "Someone added a mood read for you today."
+});
+    const updated = await fetchProfileMoods(profile.id);
+    setMoods(updated);
+
+    setSelectedMood(null);
+    setReason("");
+    setTags([]);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-bondSurface border border-bondBorder rounded-2xl p-4">
+        <h2 className="text-lg font-semibold mb-1">MOODS</h2>
+        <p className="text-xs text-bondMuted mb-4">
+          How did this person seem today?
+        </p>
+
+        <div className="grid grid-cols-2 gap-2">
+          {MOODS.map((m) => (
+            <button
+              key={m.key}
+              onClick={() => setSelectedMood(m.key)}
+              className={
+                "rounded-xl border px-3 py-2 text-xs " +
+                (selectedMood === m.key
+                  ? "border-pink-400 bg-pink-500/20"
+                  : "border-bondBorder bg-bondSurfaceSoft")
+              }
+            >
+              <div className="text-lg">{m.emoji}</div>
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Why do you think so?"
+          className="w-full mt-4 px-3 py-2 rounded-xl text-sm bg-bondSurfaceSoft border border-bondBorder"
+        />
+
+        <label className="flex items-center gap-2 mt-3 text-xs">
+          <input
+            type="checkbox"
+            checked={isAnonymous}
+            onChange={(e) => setIsAnonymous(e.target.checked)}
+          />
+          Post anonymously
+        </label>
+
+        <Button primary className="w-full mt-4" onClick={submitMood}>
+          Submit Mood
+        </Button>
+      </div>
+
+      <div className="space-y-2">
+        {moods.map((entry) => {
+          const moodObj = MOODS.find((m) => m.key === entry.mood);
+
+          return (
+            <div
+              key={entry.id}
+              className="bg-bondSurfaceSoft border border-bondBorder rounded-xl p-3"
+            >
+              <div className="text-sm font-medium">
+                {moodObj?.emoji} {moodObj?.label}
+              </div>
+              <p className="text-xs text-bondMuted mt-1">
+                {entry.reason || "No reason added"}
+              </p>
+              <p className="text-[10px] text-bondMuted mt-2">
+                {entry.is_anonymous ? "Anonymous" : "Visible"}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+/* =====================================================
+   MOOD HUB — full social perception layer
+   Replaces direct MoodTab usage throughout the app
+===================================================== */
+function MoodHub({ currentUser }) {
+  const [tab, setTab] = React.useState("mine");
+
+  const TABS = [
+    { id: "mine",      label: "My Reads" },
+    { id: "drop",      label: "Drop Mood" },
+    { id: "community", label: "Community" },
+  ];
+
+  return (
+    <div style={{ padding: "0 16px 32px" }}>
+      {/* Tab bar */}
+      <div style={{
+        display: "flex", gap: 4, padding: "3px",
+        borderRadius: 14,
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.07)",
+        marginBottom: 16,
+      }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{
+            flex: 1, padding: "8px 0", borderRadius: 11, fontSize: 12,
+            fontWeight: tab === t.id ? 700 : 500,
+            background: tab === t.id ? "rgba(248,113,113,0.18)" : "transparent",
+            color: tab === t.id ? "#f87171" : "rgba(255,255,255,0.4)",
+            border: tab === t.id ? "1px solid rgba(248,113,113,0.22)" : "1px solid transparent",
+            cursor: "pointer", transition: "all 0.18s", fontFamily: "inherit",
+          }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "mine"      && <MyMoodReads   currentUser={currentUser} />}
+      {tab === "drop"      && <DropMoodFlow  currentUser={currentUser} />}
+      {tab === "community" && <CommunityMoodFeed />}
+    </div>
+  );
+}
+
+/* ── My Reads: what people sense about you today ── */
+function MyMoodReads({ currentUser }) {
+  const [moods, setMoods] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [summary, setSummary] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!currentUser?.id) { setLoading(false); return; }
+    let mounted = true;
+    async function load() {
+      const today = new Date().toISOString().slice(0, 10);
+      const [allRes, todayRes] = await Promise.all([
+        window.supabaseClient
+          .from("profile_moods")
+          .select("*")
+          .eq("target_user_id", currentUser.id)
+          .order("created_at", { ascending: false })
+          .limit(30),
+        window.supabaseClient
+          .from("profile_moods")
+          .select("*")
+          .eq("target_user_id", currentUser.id)
+          .gte("created_at", today + "T00:00:00"),
+      ]);
+      if (!mounted) return;
+      const all = allRes.data || [];
+      const todays = todayRes.data || [];
+      setMoods(all);
+      if (todays.length > 0) {
+        const avg = todays.reduce((s, m) => s + Number(m.mood_score || 0), 0) / todays.length;
+        const topMood = MOODS.find(m => m.key === todays[0]?.mood);
+        setSummary({ avg: Math.round(avg * 10) / 10, count: todays.length, topMood });
+      }
+      setLoading(false);
+    }
+    load();
+    return () => { mounted = false; };
+  }, [currentUser?.id]);
+
+  const fmt = (ts) => {
+    const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
+    if (diff < 1) return "just now";
+    if (diff < 60) return `${diff}m ago`;
+    if (diff < 1440) return `${Math.floor(diff / 60)}h ago`;
+    return `${Math.floor(diff / 1440)}d ago`;
+  };
+
+  if (loading) return (
+    <div style={{ textAlign: "center", padding: "48px 0", color: "rgba(248,113,113,0.4)", fontSize: 13 }}>
+      Loading your reads…
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Today's summary card */}
+      {summary ? (
+        <div style={{
+          background: "rgba(248,113,113,0.07)",
+          border: "1px solid rgba(248,113,113,0.18)",
+          borderRadius: 18, padding: "16px 18px", marginBottom: 16,
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.3)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>
+            Today · {summary.count} read{summary.count !== 1 ? "s" : ""}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ fontSize: 40 }}>{summary.topMood?.emoji || "🤔"}</div>
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "#fff" }}>
+                {summary.topMood?.label || "Mixed vibes"}
+              </div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 3 }}>
+                avg mood score: {summary.avg > 0 ? "+" : ""}{summary.avg}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          background: "rgba(255,255,255,0.03)",
+          border: "1px dashed rgba(255,255,255,0.1)",
+          borderRadius: 18, padding: "20px", textAlign: "center", marginBottom: 16,
+        }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>👀</div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>
+            No mood reads today yet
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", marginTop: 4 }}>
+            Share your profile link to get reads from people
+          </div>
+        </div>
+      )}
+
+      {/* Feed */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>
+        Recent reads
+      </div>
+
+      {moods.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "32px 0", color: "rgba(255,255,255,0.2)", fontSize: 13 }}>
+          No reads yet — share your profile to get started
+        </div>
+      ) : moods.map(entry => {
+        const moodObj = MOODS.find(m => m.key === entry.mood);
+        return (
+          <div key={entry.id} style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 14, padding: "12px 14px", marginBottom: 8,
+            display: "flex", gap: 12, alignItems: "flex-start",
+          }}>
+            <div style={{ fontSize: 24, flexShrink: 0 }}>{moodObj?.emoji || "🤔"}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
+                  {moodObj?.label || entry.mood}
+                </div>
+                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>
+                  {fmt(entry.created_at)}
+                </div>
+              </div>
+              {entry.reason && (
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 4, lineHeight: 1.5 }}>
+                  "{entry.reason}"
+                </div>
+              )}
+              {entry.reason_tags?.length > 0 && (
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+                  {entry.reason_tags.map(tag => (
+                    <span key={tag} style={{
+                      fontSize: 10, padding: "2px 8px", borderRadius: 999,
+                      background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}>{tag}</span>
+                  ))}
+                </div>
+              )}
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", marginTop: 6 }}>
+                {entry.is_anonymous ? "👻 anonymous" : `@${entry.reviewer_username || "someone"}`}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── Drop Mood: search user → pick mood → submit ── */
+function DropMoodFlow({ currentUser }) {
+  const [search, setSearch]           = React.useState("");
+  const [results, setResults]         = React.useState([]);
+  const [searching, setSearching]     = React.useState(false);
+  const [target, setTarget]           = React.useState(null);
+  const [selectedMood, setSelectedMood] = React.useState(null);
+  const [reason, setReason]           = React.useState("");
+  const [tags, setTags]               = React.useState([]);
+  const [isAnon, setIsAnon]           = React.useState(true);
+  const [submitting, setSubmitting]   = React.useState(false);
+  const [done, setDone]               = React.useState(false);
+
+  React.useEffect(() => {
+    if (!search.trim()) { setResults([]); return; }
+    const t = setTimeout(async () => {
+      setSearching(true);
+      const { data } = await window.supabaseClient
+        .from("profiles")
+        .select("id, username, display_name, avatar_url")
+        .ilike("username", `%${search}%`)
+        .limit(6);
+      setResults(data || []);
+      setSearching(false);
+    }, 320);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const toggleTag = (tag) =>
+    setTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+
+  async function submit() {
+    if (!target || !selectedMood || !currentUser?.id) return;
+    setSubmitting(true);
+    try {
+      const moodObj = MOODS.find(m => m.key === selectedMood);
+      await window.supabaseClient.from("profile_moods").insert({
+        target_user_id:   target.id,
+        reviewer_user_id: currentUser.id,
+        mood:             selectedMood,
+        mood_score:       moodObj?.score ?? 0,
+        reason:           reason.trim() || null,
+        reason_tags:      tags,
+        is_anonymous:     isAnon,
+        reviewer_username: isAnon ? null : (currentUser.user_metadata?.username || currentUser.email?.split("@")[0] || "anon"),
+      });
+      await window.supabaseClient.from("notifications").insert({
+        user_id:    target.id,
+        profile_id: currentUser.id,
+        type:       "mood_added",
+        message:    isAnon
+          ? "Someone dropped a mood read on you today."
+          : `${currentUser.user_metadata?.username || "Someone"} dropped a mood read on you.`,
+      });
+      setDone(true);
+    } catch (e) {
+      console.error("[MoodHub] submit failed", e);
+    }
+    setSubmitting(false);
+  }
+
+  function reset() {
+    setDone(false); setTarget(null); setSearch(""); setResults([]);
+    setSelectedMood(null); setReason(""); setTags([]); setIsAnon(true);
+  }
+
+  /* ── Done state ── */
+  if (done) return (
+    <div style={{ textAlign: "center", padding: "48px 16px" }}>
+      <div style={{ fontSize: 44, marginBottom: 12 }}>✨</div>
+      <div style={{ fontSize: 17, fontWeight: 800, color: "#fff", marginBottom: 6 }}>
+        Mood dropped on @{target?.username}
+      </div>
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginBottom: 24 }}>
+        They'll feel it — {isAnon ? "anonymously" : "from you"}.
+      </div>
+      <button onClick={reset} style={{
+        padding: "11px 28px", borderRadius: 14,
+        background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+        color: "rgba(255,255,255,0.5)", fontSize: 13, fontWeight: 600,
+        cursor: "pointer", fontFamily: "inherit",
+      }}>
+        Drop another
+      </button>
+    </div>
+  );
+
+  /* ── Target not yet selected ── */
+  if (!target) return (
+    <div>
+      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", marginBottom: 14 }}>
+        Who are you reading today?
+      </div>
+      <div style={{ position: "relative", marginBottom: 4 }}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search by username…"
+          style={{
+            width: "100%", boxSizing: "border-box",
+            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 14, padding: "12px 16px", fontSize: 14, color: "#fff",
+            outline: "none", fontFamily: "inherit",
+          }}
+        />
+      </div>
+      {searching && (
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", padding: "8px 4px" }}>
+          Searching…
+        </div>
+      )}
+      {results.map(u => (
+        <button key={u.id} onClick={() => { setTarget(u); setSearch(""); setResults([]); }}
+          style={{
+            width: "100%", display: "flex", alignItems: "center", gap: 12,
+            padding: "12px 14px", borderRadius: 12, marginBottom: 6,
+            background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+            cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+          }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+            background: "rgba(248,113,113,0.15)", display: "flex",
+            alignItems: "center", justifyContent: "center",
+            fontSize: 14, fontWeight: 700, color: "#f87171",
+          }}>
+            {(u.username || "?")[0].toUpperCase()}
+          </div>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>@{u.username}</div>
+            {u.display_name && u.display_name !== u.username && (
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>{u.display_name}</div>
+            )}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+
+  /* ── Target selected — mood picker ── */
+  return (
+    <div>
+      {/* Target header */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 10, marginBottom: 20,
+        background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+        borderRadius: 14, padding: "12px 14px",
+      }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: 10,
+          background: "rgba(248,113,113,0.15)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 14, fontWeight: 700, color: "#f87171",
+        }}>
+          {(target.username || "?")[0].toUpperCase()}
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>@{target.username}</div>
+        </div>
+        <button onClick={() => setTarget(null)} style={{
+          background: "none", border: "none",
+          color: "rgba(255,255,255,0.3)", cursor: "pointer", fontSize: 18,
+        }}>×</button>
+      </div>
+
+      {/* Mood grid */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.3)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>
+        How do they seem today?
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+        {MOODS.map(m => (
+          <button key={m.key} onClick={() => setSelectedMood(m.key)} style={{
+            padding: "10px 12px", borderRadius: 12, cursor: "pointer",
+            background: selectedMood === m.key ? "rgba(248,113,113,0.18)" : "rgba(255,255,255,0.04)",
+            border: selectedMood === m.key ? "1px solid rgba(248,113,113,0.4)" : "1px solid rgba(255,255,255,0.08)",
+            display: "flex", alignItems: "center", gap: 8, fontFamily: "inherit",
+            transition: "all 0.15s",
+          }}>
+            <span style={{ fontSize: 20 }}>{m.emoji}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: selectedMood === m.key ? "#fca5a5" : "rgba(255,255,255,0.6)" }}>
+              {m.label}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Reason */}
+      <textarea
+        value={reason}
+        onChange={e => setReason(e.target.value)}
+        placeholder="Why do you think so? (optional)"
+        rows={2}
+        style={{
+          width: "100%", boxSizing: "border-box",
+          background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)",
+          borderRadius: 12, padding: "10px 12px", fontSize: 13, color: "#fff",
+          outline: "none", resize: "none", fontFamily: "inherit", marginBottom: 12,
+        }}
+      />
+
+      {/* Tags */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+        {REASON_TAGS.map(tag => (
+          <button key={tag} onClick={() => toggleTag(tag)} style={{
+            padding: "5px 12px", borderRadius: 999, fontSize: 11, fontWeight: 600,
+            cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
+            background: tags.includes(tag) ? "rgba(248,113,113,0.18)" : "rgba(255,255,255,0.05)",
+            border: tags.includes(tag) ? "1px solid rgba(248,113,113,0.35)" : "1px solid rgba(255,255,255,0.09)",
+            color: tags.includes(tag) ? "#fca5a5" : "rgba(255,255,255,0.45)",
+          }}>
+            {tag}
+          </button>
+        ))}
+      </div>
+
+      {/* Anon toggle */}
+      <button onClick={() => setIsAnon(v => !v)} style={{
+        width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "12px 16px", borderRadius: 14, marginBottom: 16, cursor: "pointer",
+        background: isAnon ? "rgba(251,191,36,0.06)" : "rgba(255,255,255,0.04)",
+        border: isAnon ? "1px solid rgba(251,191,36,0.2)" : "1px solid rgba(255,255,255,0.09)",
+        fontFamily: "inherit",
+      }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", textAlign: "left" }}>
+            {isAnon ? "👻 Anonymous" : "🙋 Visible to them"}
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", textAlign: "left", marginTop: 2 }}>
+            {isAnon ? "They won't know it's you" : "Your username will show"}
+          </div>
+        </div>
+        <div style={{
+          width: 40, height: 22, borderRadius: 999,
+          background: isAnon ? "#fbbf24" : "rgba(255,255,255,0.1)",
+          position: "relative", transition: "background 0.2s", flexShrink: 0,
+        }}>
+          <div style={{
+            width: 18, height: 18, borderRadius: 999, background: "#fff",
+            position: "absolute", top: 2,
+            left: isAnon ? 20 : 2, transition: "left 0.2s",
+          }} />
+        </div>
+      </button>
+
+      {/* Submit */}
+      <button onClick={submit} disabled={!selectedMood || submitting} style={{
+        width: "100%", padding: "14px", borderRadius: 16, border: "none",
+        background: selectedMood ? "linear-gradient(135deg,#f87171,#fb923c)" : "rgba(255,255,255,0.07)",
+        color: selectedMood ? "#fff" : "rgba(255,255,255,0.25)",
+        fontSize: 14, fontWeight: 800, cursor: selectedMood ? "pointer" : "default",
+        opacity: submitting ? 0.7 : 1, fontFamily: "inherit",
+        boxShadow: selectedMood ? "0 8px 24px rgba(248,113,113,0.3)" : "none",
+        transition: "all 0.2s",
+      }}>
+        {submitting ? "Dropping…" : "Drop Mood ✨"}
+      </button>
+    </div>
+  );
+}
+
+/* ── Community: anonymized vibe pulse ── */
+function CommunityMoodFeed() {
+  const [entries, setEntries] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let mounted = true;
+    async function load() {
+      const { data } = await window.supabaseClient
+        .from("profile_moods")
+        .select("id, mood, reason_tags, mood_score, created_at, is_anonymous")
+        .order("created_at", { ascending: false })
+        .limit(40);
+      if (mounted) { setEntries(data || []); setLoading(false); }
+    }
+    load();
+    return () => { mounted = false; };
+  }, []);
+
+  const fmt = (ts) => {
+    const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
+    if (diff < 1) return "just now";
+    if (diff < 60) return `${diff}m ago`;
+    if (diff < 1440) return `${Math.floor(diff / 60)}h ago`;
+    return `${Math.floor(diff / 1440)}d ago`;
+  };
+
+  // Mood score to bar color
+  const scoreColor = (s) => {
+    if (s >= 2) return "rgba(52,211,153,0.7)";
+    if (s >= 1) return "rgba(96,165,250,0.7)";
+    if (s === 0) return "rgba(251,191,36,0.7)";
+    if (s >= -1) return "rgba(251,146,60,0.7)";
+    return "rgba(248,113,113,0.7)";
+  };
+
+  if (loading) return (
+    <div style={{ textAlign: "center", padding: "48px 0", color: "rgba(248,113,113,0.4)", fontSize: 13 }}>
+      Loading pulse…
+    </div>
+  );
+
+  if (entries.length === 0) return (
+    <div style={{ textAlign: "center", padding: "48px 0", color: "rgba(255,255,255,0.2)", fontSize: 13 }}>
+      <div style={{ fontSize: 32, marginBottom: 8 }}>🌐</div>
+      No mood drops yet — be the first
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 14, lineHeight: 1.6 }}>
+        Anonymized pulse of how people are reading each other today.
+      </div>
+      {entries.map(entry => {
+        const moodObj = MOODS.find(m => m.key === entry.mood);
+        return (
+          <div key={entry.id} style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "10px 14px", borderRadius: 12, marginBottom: 6,
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}>
+            <span style={{ fontSize: 22, flexShrink: 0 }}>{moodObj?.emoji || "🤔"}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.65)" }}>
+                {moodObj?.label || entry.mood}
+              </div>
+              {entry.reason_tags?.length > 0 && (
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+                  {entry.reason_tags.map(tag => (
+                    <span key={tag} style={{
+                      fontSize: 10, padding: "1px 7px", borderRadius: 999,
+                      background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.35)",
+                    }}>{tag}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+              <div style={{
+                width: 6, height: 6, borderRadius: 999,
+                background: scoreColor(entry.mood_score),
+              }} />
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.2)" }}>{fmt(entry.created_at)}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function getPartnerDP(role) {
 try {
@@ -1454,27 +2229,23 @@ return /^[A-Za-z .'-]+$/.test(trimmed);
 const canSave = validateName(partners[0]);
 
 const submit = () => {
-if (!canSave) {
-setError("Use at least 2 letters for your name.");
-return;
-}
+  if (!canSave) {
+    setError("Use at least 2 letters for your name.");
+    return;
+  }
 
-const cleaned = partners.map((p) => p.trim()).filter(Boolean);
-const [p1Name, maybeP2, ...extra] = cleaned;
+  const cleaned = partners.map((p) => p.trim()).filter(Boolean);
+  const [p1Name, maybeP2, ...extra] = cleaned;
 
-// Optional trace (safe)
-traceAction?.("onboarding_completed", {
-hasPartner: Boolean(maybeP2),
-extraPartners: extra.length,
-});
+  saveGuestProfile(p1Name);
 
-save({
-p1Name,
-p2Name: maybeP2 || null,
-extraPartners: extra,
-});
+  save({
+    p1Name,
+    p2Name: maybeP2 || "",
+    extraPartners: extra,
+    quizState: "menu",
+  });
 };
-
 return (
 <div className="h-screen flex flex-col bg-bondBg text-bondText px-8 py-10 max-w-md mx-auto overflow-hidden relative">
 <div className="absolute inset-0 pointer-events-none opacity-30">
@@ -4775,29 +5546,42 @@ SUPABASE AUTH SETUP (TOP OF FILE – OUTSIDE COMPONENT)
 
 
 /* ---------------- USER UPSERT ---------------- */
-async function upsertUserFromSupabase(user) {
-if (!user?.id) return;
+async function upsertUserFromSupabase() {
+  // ✅ ADD HERE
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-const username =
-user.user_metadata?.full_name ||
-user.email?.split("@")[0] ||
-"user";
+  if (!user) {
+    console.error("No authenticated user");
+    return;
+  }
 
-const { error } = await supabase
-.from("profiles")
-.upsert(
-{
-  id: user.id,
-  username,
-  avatar_url: user.user_metadata?.avatar_url ?? null,
- 
-},
-{ onConflict: "id" }
-);
+  console.log("[PROFILE SAVING]", user);
 
-if (error) {
-console.error("[upsertUserFromSupabase] failed:", error.message);
-}
+  const safeUsername =
+    (user.user_metadata?.full_name ||
+      user.email?.split("@")[0] ||
+      "user")
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, "_") +
+    "_" +
+    user.id.slice(0, 6);
+
+  const { error } = await supabase
+    .from("profiles")
+     .upsert(profileData, { onConflict: "username" })
+  .select()
+  .single();
+
+  if (error) {
+    console.error("Profile save error full:", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    });
+  }
 }
 
 /* ============================================================
@@ -6432,6 +7216,7 @@ const TABS = [
   { id:"celeb", label:"⭐ Celeb Ships" },
   { id:"drop",  label:"⚡ Drop a Ship" },
   { id:"hall",  label:"🏆 Hall of Ships" },
+    { id: "mood", label: "Mood" },
 ];
 
 return (
@@ -6554,7 +7339,8 @@ return (
         }
       </div>
     )}
-
+    {/* ── MOOD ── */}                          {/* 👈 ADD THIS BLOCK HERE */}
+    {tab === "mood" && <MoodHub currentUser={window.currentUser} />}
   </AppShell>
 );
 }
@@ -9219,9 +10005,10 @@ return (
 {/* Tab bar */}
 <div style={{ display:"flex", gap:4, padding:"3px", borderRadius:14, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)", marginBottom:16 }}>
 {[
-{ id:"profile", label:"Profile" },
-{ id:"status", label:"📸 Status" },
-{ id:"challenges", label:"⚡ Challenges" }
+  { id:"profile", label:"Profile" },
+  { id:"moods", label:"🧠 Moods" },
+  { id:"status", label:"📸 Status" },
+  { id:"challenges", label:"⚡ Challenges" }
 ].map(t => (
 <button key={t.id} onClick={() => setActiveTab(t.id)}
 style={{ flex:1, padding:"8px 0", borderRadius:11, fontSize:13, fontWeight: activeTab===t.id ? 700 : 500, background: activeTab===t.id ? "rgba(248,113,113,0.18)" : "transparent", color: activeTab===t.id ? "#f87171" : "rgba(255,255,255,0.4)", border: activeTab===t.id ? "1px solid rgba(248,113,113,0.22)" : "1px solid transparent", cursor:"pointer", transition:"all 0.18s", fontFamily:"inherit" }}>
@@ -9328,6 +10115,11 @@ Followers can tap your card avatar to view them.
 <CoupleStatus coupleId={couple.id} isOwner={true} />
 </div>
 )}
+{/* MOODS TAB */}
+{activeTab === "moods" && (
+  <MoodHub currentUser={window.currentUser} />
+)}
+
 {/* PROFILE TAB */}
 {activeTab === "profile" && (
 <button className="bond-cta" onClick={() => setEditing(true)}
@@ -9511,47 +10303,84 @@ return <MyCoupleProfile couple={couple} onUpdate={setCouple} defaultTab="challen
 }
 
 function SocialHub() {
-const { loading } = useSocial();
-const [tab, setTab] = React.useState("feed");
-if (loading) return (
-<div style={{ display:"flex", alignItems:"center", justifyContent:"center",
-padding:"60px 0", color:"rgba(248,113,113,0.4)", fontSize:13, fontWeight:500 }}>
-Loading…
-</div>
-);
-return (
-<div style={{ paddingBottom:8 }}>
-<div style={{ padding:"18px 20px 0", marginBottom:4 }}>
-  <div style={{ fontSize:11, fontWeight:600, letterSpacing:"0.1em",
-    color:"rgba(255,255,255,0.2)", textTransform:"uppercase", marginBottom:12 }}>
-    Social
-  </div>
-  <div style={{ display:"flex", gap:4, padding:"3px", borderRadius:14,
-    background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.07)" }}>
-    {[
-      { id:"feed", label:"Discover" },
-      { id:"couple", label:"My Couple" },
-      { id:"challenges", label:"\u26A1 Challenges" },
-    ].map(t => (
-      <button key={t.id} onClick={() => setTab(t.id)}
-        style={{ flex:1, padding:"8px 0", borderRadius:11, fontSize:12,
-          fontWeight: tab===t.id ? 700 : 500,
-          background: tab===t.id ? "rgba(248,113,113,0.18)" : "transparent",
-          color: tab===t.id ? "#f87171" : "rgba(255,255,255,0.4)",
-          border: tab===t.id ? "1px solid rgba(248,113,113,0.22)" : "1px solid transparent",
-          cursor:"pointer", transition:"all 0.18s ease", fontFamily:"inherit" }}>
-        {t.label}
-      </button>
-    ))}
-  </div>
-</div>
-<div style={{ marginTop:16 }}>
-  {tab === "feed" && <CoupleFeed />}
-  {tab === "couple" && <CoupleHub />}
-  {tab === "challenges" && <ChallengesHub />}
-</div>
-</div>
-);
+  const { user, profile, loading } = useSocial();
+  const [tab, setTab] = React.useState("feed");
+
+  if (loading) return (
+    <div style={{
+      display:"flex",
+      alignItems:"center",
+      justifyContent:"center",
+      padding:"60px 0",
+      color:"rgba(248,113,113,0.4)",
+      fontSize:13,
+      fontWeight:500
+    }}>
+      Loading…
+    </div>
+  );
+
+  const tabs = [
+    { id:"feed", label:"People" },
+    { id:"couple", label:"Social" },
+    { id:"mood", label:"Mood" },
+    { id:"challenges", label:"⚡" },
+  ];
+
+  return (
+    <div style={{ paddingBottom:8 }}>
+      <div style={{ padding:"18px 20px 0", marginBottom:4 }}>
+        <div style={{
+          fontSize:11,
+          fontWeight:600,
+          letterSpacing:"0.1em",
+          color:"rgba(255,255,255,0.2)",
+          textTransform:"uppercase",
+          marginBottom:12
+        }}>
+          Social
+        </div>
+
+        <div style={{
+          display:"flex",
+          gap:4,
+          padding:"3px",
+          borderRadius:14,
+          background:"rgba(255,255,255,0.05)",
+          border:"1px solid rgba(255,255,255,0.07)"
+        }}>
+          {tabs.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              style={{
+                flex:1,
+                padding:"8px 0",
+                borderRadius:11,
+                fontSize:12,
+                fontWeight: tab === t.id ? 700 : 500,
+                background: tab === t.id ? "rgba(248,113,113,0.18)" : "transparent",
+                color: tab === t.id ? "#f87171" : "rgba(255,255,255,0.4)",
+                border: tab === t.id ? "1px solid rgba(248,113,113,0.22)" : "1px solid transparent",
+                cursor:"pointer",
+                transition:"all 0.18s ease",
+                fontFamily:"inherit"
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginTop:16 }}>
+        {tab === "feed" && <CoupleFeed />}
+        {tab === "couple" && <CoupleHub />}
+        {tab === "mood" && <MoodHub currentUser={user} />}
+        {tab === "challenges" && <ChallengesHub />}
+      </div>
+    </div>
+  );
 }
 /* ============================================================
 1. REPLACE → function CoupleHub()
@@ -9724,7 +10553,9 @@ const userKey = username
 
 /* 🔒 DO NOT CHANGE — REQUIRED FOR CLONE / IDEAL */
 const { data, save, loaded, isNamesSet } = useRelationshipState(userKey);
-
+  React.useEffect(() => {
+    window.currentUser = user;
+  }, [user]);
 /* ---------------- ANALYTICS ---------------- */
 useEffect(() => {
 if (!window.BondTrace) return;
@@ -9853,7 +10684,6 @@ return (
 }
 
 /* ---------------- VIEW SWITCHER ---------------- */
-
 const renderView = () => {
 switch (view) {
 case "ideal":
@@ -9861,6 +10691,20 @@ case "ideal":
 
 case "social":
   return <SocialHub />;
+
+case "moods":
+  return (
+    <MoodTab
+      profile={{
+        id: localStorage.getItem("bond_guest_uuid"),
+        username: data.p1Name,
+        display_name: data.p1Name,
+      }}
+      currentUser={{
+        id: localStorage.getItem("bond_guest_uuid"),
+      }}
+    />
+  );
 
 default:
   return (
@@ -9874,7 +10718,6 @@ default:
   );
 }
 };
-
 /* ---------------- MAIN APP ---------------- */
 
 return (
@@ -9897,7 +10740,7 @@ justifyContent: "space-around",
 <NavBtn v="test" icon="heart" label="Test" />
 <NavBtn v="verse" icon="atom" label="Verse" />
 <NavBtn v="social" icon="users" label="Social" />
-<NavBtn v="plan" icon="calendar" label="Plan" />
+<NavBtn v="moods" icon="pulse" label="Moods" />
 <NavBtn v="play" icon="puzzle" label="Play" />
 </div>
 </div>
